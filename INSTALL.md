@@ -13,7 +13,7 @@ If you want the in-app **↻ Update from Git** button (friend clicks it after yo
 push new commits), install with git instead of a zip:
 
 ```bash
-git clone https://github.com/YOUR_USER/turnwise.git
+git clone https://github.com/Gamy-sys/turnwise.git
 cd turnwise          # folder that contains run.sh
 chmod +x run.sh
 ./run.sh
