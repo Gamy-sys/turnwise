@@ -1,0 +1,77 @@
+{
+  "name": "turnwise",
+  "productName": "Turnwise",
+  "version": "0.2.0",
+  "description": "Turnwise — batch and advanced Conversation-Analysis transcription",
+  "main": "main.js",
+  "author": "Turnwise",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg zip"
+  },
+  "build": {
+    "appId": "app.turnwise.desktop",
+    "productName": "Turnwise",
+    "copyright": "Copyright © Turnwise",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/.venv/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.pytest_cache/**"
+        ]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../run.sh",
+        "to": "run.sh"
+      },
+      {
+        "from": "../icons/turnwise.svg",
+        "to": "icons/turnwise.svg"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] },
+        { "target": "zip", "arch": ["arm64", "x64"] }
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "Turnwise ${version}",
+      "contents": [
+        { "x": 140, "y": 180, "type": "file" },
+        { "x": 420, "y": 180, "type": "link", "path": "/Applications" }
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

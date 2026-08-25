@@ -1,0 +1,2 @@
+# Placeholder so electron-builder has a build/ dir.
+# On Mac, scripts/build-mac.sh can generate icon.icns here from icons/turnwise.svg.

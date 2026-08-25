@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Turnwise
+GenericName=Conversation Analysis
+Comment=Batch and advanced Jefferson CA transcription
+Exec=/home/majestic1/Projects/negrospowerph-scanner/ca-studio/desktop-launch.sh
+Path=/home/majestic1/Projects/negrospowerph-scanner/ca-studio
+Icon=/home/majestic1/Projects/negrospowerph-scanner/ca-studio/icons/turnwise.svg
+Terminal=false
+Categories=AudioVideo;Audio;Science;Development;
+Keywords=transcription;conversation;analysis;jefferson;whisper;batch;turnwise;
+StartupNotify=true
+StartupWMClass=turnwise

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CA Studio
+GenericName=Conversation Analysis
+Comment=Transcribe audio with Jefferson CA notation and karaoke playback
+Exec=/home/majestic1/Projects/negrospowerph-scanner/ca-studio/desktop-launch.sh
+Path=/home/majestic1/Projects/negrospowerph-scanner/ca-studio
+Icon=/home/majestic1/Projects/negrospowerph-scanner/ca-studio/icons/ca-studio.svg
+Terminal=false
+Categories=AudioVideo;Audio;Science;Development;
+Keywords=transcription;conversation;analysis;jefferson;whisper;
+StartupNotify=true
+StartupWMClass=ca-studio

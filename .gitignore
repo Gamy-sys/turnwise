@@ -1,0 +1,26 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+desktop/node_modules/
+desktop/dist/
+desktop/dist-*/
+
+# Runtime data (uploads, WAVs, transcripts, downloaded models, secrets)
+data/
+**/secrets.json
+.env
+.env.*
+
+# Logs / scratch
+server.log
+*.log
+.ca-studio-server.log
+.ca-studio-server.pid
+.ca-studio.port
+sample.mp3
