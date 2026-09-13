@@ -169,6 +169,11 @@ export default function SettingsPanel({ settings, onChange }) {
           }
         />
       </label>
+      {settings.transcript_layout === "japanese_four_line" && (
+        <p className="hint">
+          For Japanese mono recordings, set the speaker count explicitly (e.g. 2) if labels stay on one speaker.
+        </p>
+      )}
 
       <h3>OpenAI (optional)</h3>
       <label className="field checkbox">

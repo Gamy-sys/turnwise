@@ -196,7 +196,7 @@ export default function App() {
     try {
       // New projects start from server defaults; tune them afterwards via the
       // project's own ⚙ settings (saved API keys are reused automatically).
-      const { project_id } = await api.uploadAudio(file, defaults || {});
+      const { project_id } = await api.uploadAudio(file, settings || defaults || {});
       setPid(project_id);
       setTranscript(null);
       setTab("project");

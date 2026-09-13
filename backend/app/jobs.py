@@ -294,6 +294,19 @@ def _run(project_id: str, source_path: Path, settings: Settings):
             check_cancel(project_id)
             cb = stage_progress("diarize", _STAGES[1][1])
             diar = diarization.diarize(str(wav), settings, progress=cb)
+            try:
+                (pdir / "diar.json").write_text(
+                    json.dumps({
+                        "available": diar.available,
+                        "error": diar.error,
+                        "source": diar.source,
+                        "segments": [{"start": s, "end": e, "speaker": sp} for s, e, sp in diar.segments],
+                        "overlaps": [{"start": a, "end": b} for a, b in diar.overlaps],
+                    }, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
             done += _STAGES[1][1]
 
             check_cancel(project_id)

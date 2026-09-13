@@ -16,7 +16,7 @@ from ..config import Settings
 from ..models import (Cue, DocumentMeta, PitchPoint, Speaker, Token, Transcript, Turn)
 from .asr import ASRResult
 from .prosody import Prosody
-from .diarization import DiarResult, speaker_at
+from .diarization import DiarResult, speaker_for_interval
 
 _VOWELS = "aeiouyAEIOUY"
 _JAPANESE_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
@@ -155,7 +155,9 @@ def build_transcript(project_id: str, filename: str, duration: float,
         labels = sorted({w.speaker for w in words})  # type: ignore[attr-defined]
     elif diar.available and diar.segments:
         for w in words:
-            w.speaker = speaker_at(diar.segments, (w.start + w.end) / 2)  # type: ignore[attr-defined]
+            w.speaker = speaker_for_interval(  # type: ignore[attr-defined]
+                diar.segments, w.start, w.end,
+            )
         labels = sorted({w.speaker for w in words})  # type: ignore[attr-defined]
     else:
         for w in words:
@@ -293,7 +295,14 @@ def build_transcript(project_id: str, filename: str, duration: float,
         created_at=datetime.now(timezone.utc).isoformat(),
         models={"asr": asr.model_name, "language": asr.language,
                 "diarization": diar.source if diar.available else None},
-        warnings=[] if diar.available else [diar.error or "diarization unavailable"],
+        warnings=(
+            ([] if diar.available else [diar.error or "diarization unavailable"])
+            + (
+                ["Only one speaker detected — set Number of speakers in Settings (e.g. 2) and Update transcript"]
+                if diar.available and len(labels) < 2 and settings.enable_diarization
+                else []
+            )
+        ),
     )
     tr = Transcript(meta=meta, speakers=speakers, turns=turns,
                     pitch=[PitchPoint(t=round(t, 3), f0=round(f, 1)) for t, f in pitch_pts],

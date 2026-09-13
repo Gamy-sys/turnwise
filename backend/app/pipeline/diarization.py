@@ -77,7 +77,11 @@ def diarize(wav_path: str, settings, progress=None) -> DiarResult:
 
         kwargs = {}
         if settings.num_speakers:
-            kwargs["num_speakers"] = settings.num_speakers
+            n = int(settings.num_speakers)
+            kwargs["num_speakers"] = n
+            # pyannote 3.x/4.x: also pin min/max so Japanese mono mixes don't collapse
+            kwargs["min_speakers"] = n
+            kwargs["max_speakers"] = n
         if progress:
             progress(0.3, "Diarizing speakers")
         # Feed a pre-decoded waveform instead of a path so pyannote never
@@ -87,7 +91,12 @@ def diarize(wav_path: str, settings, progress=None) -> DiarResult:
         diar_input = _load_waveform(wav_path)
         if diar_input is None:
             diar_input = wav_path  # last-ditch fallback to the old path-based call
-        diarization = pipeline(diar_input, **kwargs)
+        try:
+            diarization = pipeline(diar_input, **kwargs)
+        except TypeError:
+            kwargs.pop("min_speakers", None)
+            kwargs.pop("max_speakers", None)
+            diarization = pipeline(diar_input, **kwargs)
 
         # pyannote 3.x returns an Annotation directly; pyannote 4.x (community-1)
         # returns a DiarizeOutput wrapping the Annotation in .speaker_diarization.
@@ -150,23 +159,35 @@ def _detect_overlaps(segments: list[tuple[float, float, str]]) -> list[tuple[flo
 
 def speaker_at(segments: list[tuple[float, float, str]], t: float, default: str = "A") -> str:
     """Return the speaker label whose segment best contains time `t`."""
+    return speaker_for_interval(segments, t, t, default=default)
+
+
+def speaker_for_interval(
+    segments: list[tuple[float, float, str]],
+    start: float,
+    end: float,
+    default: str = "A",
+) -> str:
+    """Map a timed word span to the diarization label with the most overlap."""
+    if end < start:
+        start, end = end, start
+    mid = (start + end) / 2.0
     best = default
-    best_overlap = 0.0
+    best_ov = 0.0
     for s, e, lbl in segments:
-        if e <= t or s >= t:
-            continue
-        best = lbl
-        break
-    else:
-        # nearest segment fallback
-        nearest = None
-        nearest_dist = 1e9
-        for s, e, lbl in segments:
-            mid = (s + e) / 2
-            d = abs(mid - t)
-            if d < nearest_dist:
-                nearest_dist = d
-                nearest = lbl
-        if nearest:
-            best = nearest
-    return best
+        ov = min(e, end) - max(s, start)
+        if ov > best_ov:
+            best_ov = ov
+            best = lbl
+    if best_ov > 0:
+        return best
+    # Point fallback: nearest segment centre (handles gaps between diar segments).
+    nearest = None
+    nearest_dist = 1e9
+    for s, e, lbl in segments:
+        centre = (s + e) / 2.0
+        d = abs(centre - mid)
+        if d < nearest_dist:
+            nearest_dist = d
+            nearest = lbl
+    return nearest or default

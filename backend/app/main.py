@@ -112,6 +112,19 @@ def _project_settings_file(pid: str) -> Path:
     return jobs.project_dir(pid) / "settings.json"
 
 
+def _merge_settings(override: dict | None = None) -> Settings:
+    """Global defaults + request overrides; secrets always from server store."""
+    base = load_global_settings_dict()
+    override = dict(override or {})
+    merged = {**base, **override}
+    if isinstance(base.get("thresholds"), dict) and isinstance(override.get("thresholds"), dict):
+        merged["thresholds"] = {**base["thresholds"], **override["thresholds"]}
+    try:
+        return Settings.from_dict(merged)
+    except Exception:
+        return merged_defaults()
+
+
 def _project_settings(pid: str, override: dict | None = None) -> Settings:
     """Project-saved settings merged with request overrides.
 
@@ -299,9 +312,9 @@ async def create_project(file: UploadFile = File(...), settings: str = Form("{}"
     (pdir / "original_name.txt").write_text(orig_name, encoding="utf-8")
 
     try:
-        settings_obj = Settings.from_dict(json.loads(settings or "{}"))
+        settings_obj = _merge_settings(json.loads(settings or "{}"))
     except Exception:
-        settings_obj = Settings()
+        settings_obj = merged_defaults()
 
     jobs.enqueue(pid, src, settings_obj)
     return {"project_id": pid, "filename": file.filename}
