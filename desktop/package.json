@@ -10,7 +10,8 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac dmg zip"
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:mac:all": "electron-builder --mac dmg --arm64 --x64"
   },
   "build": {
     "appId": "app.turnwise.desktop",
@@ -53,10 +54,7 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] },
-        { "target": "zip", "arch": ["arm64", "x64"] }
-      ],
+      "target": ["dmg"],
       "icon": "build/icon.icns",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,

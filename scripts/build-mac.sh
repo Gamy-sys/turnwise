@@ -1,36 +1,59 @@
 #!/usr/bin/env bash
-# Build a Mac-installable Turnwise.app / .dmg
+# Build Turnwise.app / .dmg on macOS (native CPU arch only).
 #
-# Must be run on a Mac with:
-#   - Python 3.10+
-#   - Node 18+
-#   - ffmpeg (brew install ffmpeg)
-#   - Xcode CLT
+# Prerequisites:
+#   - macOS with Xcode CLT
+#   - Python 3.10+, Node 18+, ffmpeg  (brew install python@3.12 node ffmpeg)
 #
-# Usage (from ca-studio/):
+# Usage (from the Turnwise folder):
 #   ./scripts/build-mac.sh
+# Or double-click:  Install Turnwise.command
 #
 # Output:
-#   desktop/dist/Turnwise-*-arm64.dmg
-#   desktop/dist/Turnwise-*-x64.dmg   (if building universal / both)
+#   desktop/dist/Turnwise-*.dmg
+#   desktop/dist/mac*/Turnwise.app
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND="$HERE/frontend"
 DESKTOP="$HERE/desktop"
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "WARNING: This script is meant to run on macOS."
-  echo "You can still prepare the Electron project; the .dmg must be built on a Mac."
+  echo "ERROR: build-mac.sh must run on a Mac."
+  echo "On Linux, create a sendable package with:"
+  echo "  ./scripts/make-mac-installer-zip.sh"
+  exit 1
 fi
+
+for cmd in python3 node npm ffmpeg; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "ERROR: '$cmd' not found."
+    echo "Install with:  brew install python@3.12 node ffmpeg"
+    exit 1
+  fi
+done
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  arm64) EB_ARCH="--arm64" ;;
+  x86_64) EB_ARCH="--x64" ;;
+  *) EB_ARCH="" ;;
+esac
 
 echo "[1/4] Building frontend…"
 ( cd "$FRONTEND" && npm install && npm run build )
 
+if [[ ! -f "$FRONTEND/dist/index.html" ]]; then
+  echo "ERROR: frontend build did not produce dist/index.html"
+  exit 1
+fi
+
 echo "[2/4] Preparing desktop deps…"
 ( cd "$DESKTOP" && npm install )
 
-# Optional icon conversion if iconutil / png exists
+# Optional Dock icon
 if [[ -f "$HERE/icons/turnwise.svg" && ! -f "$DESKTOP/build/icon.icns" ]]; then
   mkdir -p "$DESKTOP/build"
   if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
@@ -49,15 +72,19 @@ if [[ -f "$HERE/icons/turnwise.svg" && ! -f "$DESKTOP/build/icon.icns" ]]; then
     iconutil -c icns "$ICONSET" -o "$DESKTOP/build/icon.icns"
     rm -rf "$TMP"
   else
-    echo "[icon] skip (.icns needs rsvg-convert + iconutil on Mac). electron-builder will use a default icon."
+    echo "[icon] skip (.icns needs: brew install librsvg). Using default Electron icon."
   fi
 fi
 
-echo "[3/4] Packaging with electron-builder…"
-( cd "$DESKTOP" && npm run dist:mac )
+echo "[3/4] Packaging Turnwise.app + .dmg for $ARCH…"
+( cd "$DESKTOP" && npx electron-builder --mac dmg $EB_ARCH )
 
-echo "[4/4] Done. Installers are in:"
-ls -la "$DESKTOP/dist"/*.dmg 2>/dev/null || ls -la "$DESKTOP/dist" || true
+echo "[4/4] Done."
+echo
+ls -lah "$DESKTOP/dist"/*.dmg 2>/dev/null || true
+find "$DESKTOP/dist" -name "Turnwise.app" -type d 2>/dev/null | head -5 || true
 echo
 echo "Install: open the .dmg and drag Turnwise into Applications."
-echo "First launch installs Python packages into ~/Library/Application Support/Turnwise — allow a few minutes."
+echo "First launch installs Python packages under"
+echo "  ~/Library/Application Support/Turnwise"
+echo "(allow several minutes)."

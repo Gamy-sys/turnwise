@@ -82,33 +82,43 @@ Starts the server if needed and opens the default browser.
 
 ---
 
-## macOS app (.dmg) — build on a Mac only
+## macOS app (clickable icon) — build on a Mac
 
-If your friend has a **Mac** and wants a normal **Turnwise.app**:
+You cannot build the final `.dmg` on Linux. Send your friend the **Mac installer
+zip**, and they build the app on their Mac once.
 
-1. Install prerequisites:
+### You (Linux): create the zip to send
 
-   ```bash
-   xcode-select --install          # if not already
-   brew install ffmpeg python@3.12 node git
-   ```
+```bash
+cd turnwise   # or ca-studio
+chmod +x scripts/make-mac-installer-zip.sh
+./scripts/make-mac-installer-zip.sh ~/Desktop
+```
 
-2. From the unzipped (or cloned) folder:
+Send them: `Turnwise-Mac-Installer-*-*.zip` from the Desktop.
 
-   ```bash
-   chmod +x scripts/build-mac.sh
-   ./scripts/build-mac.sh
-   ```
+### Your friend (Mac)
 
-3. Open `desktop/dist/Turnwise-*.dmg`, drag **Turnwise** into **Applications**.
+1. Unzip the folder.
+2. Open **START HERE.txt** (or just double-click **Install Turnwise.command**).
+3. If macOS blocks it: **Right-click → Open → Open**.
+4. Wait for the build (5–15 minutes). A `.dmg` opens — **drag Turnwise into Applications**.
+5. Launch **Turnwise** from Applications / Launchpad.
 
-4. First launch: allow the app if macOS warns about an unsigned developer.
-   Turnwise installs Python deps under  
-   `~/Library/Application Support/Turnwise` — wait a few minutes.
+One-time tools on the Mac (Homebrew):
 
-**Note:** The packaged `.app` bundles a snapshot of the code. For easy
-**Update from Git**, prefer running from a `git clone` via `./run.sh` (or rebuild
-the `.dmg` after each update).
+```bash
+xcode-select --install          # if prompted
+brew install python@3.12 node ffmpeg
+```
+
+First app launch installs Python packages under  
+`~/Library/Application Support/Turnwise` — allow a few minutes.
+
+**Gatekeeper tip:** unsigned app → Right-click Turnwise → Open the first time.
+
+**Updates:** the packaged `.app` is a snapshot. For **↻ Update from Git**, prefer a
+`git clone` + `./run.sh`, or send a new installer zip after you push releases.
 
 ---
 
