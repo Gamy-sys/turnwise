@@ -1,17 +1,9 @@
 #!/usr/bin/env bash
 # Build Turnwise.app / .dmg on macOS (native CPU arch only).
 #
-# Prerequisites:
-#   - macOS with Xcode CLT
-#   - Python 3.10+, Node 18+, ffmpeg  (brew install python@3.12 node ffmpeg)
-#
-# Usage (from the Turnwise folder):
-#   ./scripts/build-mac.sh
-# Or double-click:  Install Turnwise.command
-#
-# Output:
-#   desktop/dist/Turnwise-*.dmg
-#   desktop/dist/mac*/Turnwise.app
+# Output location (this is NOT ~/Desktop):
+#   <Turnwise folder>/desktop/dist/Turnwise-*.dmg
+#   <Turnwise folder>/desktop/dist/mac*/Turnwise.app
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,13 +42,16 @@ if [[ ! -f "$FRONTEND/dist/index.html" ]]; then
   exit 1
 fi
 
-echo "[2/4] Preparing desktop deps…"
+echo "[2/4] Preparing desktop (Electron) deps…"
 ( cd "$DESKTOP" && npm install )
 
-# Optional Dock icon
-if [[ -f "$HERE/icons/turnwise.svg" && ! -f "$DESKTOP/build/icon.icns" ]]; then
+# Optional Dock icon — never fail the build if missing
+ICON_ARGS=()
+if [[ -f "$HERE/icons/turnwise.svg" ]]; then
   mkdir -p "$DESKTOP/build"
-  if command -v rsvg-convert >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+  if [[ ! -f "$DESKTOP/build/icon.icns" ]] \
+      && command -v rsvg-convert >/dev/null 2>&1 \
+      && command -v iconutil >/dev/null 2>&1; then
     echo "[icon] converting SVG → .icns"
     TMP=$(mktemp -d)
     ICONSET="$TMP/Turnwise.iconset"
@@ -71,17 +66,31 @@ if [[ -f "$HERE/icons/turnwise.svg" && ! -f "$DESKTOP/build/icon.icns" ]]; then
     cp "$ICONSET/icon_1024x1024.png" "$ICONSET/icon_512x512@2x.png"
     iconutil -c icns "$ICONSET" -o "$DESKTOP/build/icon.icns"
     rm -rf "$TMP"
-  else
-    echo "[icon] skip (.icns needs: brew install librsvg). Using default Electron icon."
   fi
+fi
+if [[ -f "$DESKTOP/build/icon.icns" ]]; then
+  ICON_ARGS=(-c.mac.icon=build/icon.icns)
+  echo "[icon] using build/icon.icns"
+else
+  echo "[icon] none — electron-builder will use the default Electron icon"
 fi
 
 echo "[3/4] Packaging Turnwise.app + .dmg for $ARCH…"
-( cd "$DESKTOP" && npx electron-builder --mac dmg $EB_ARCH )
+echo "      Output folder: $DESKTOP/dist"
+mkdir -p "$DESKTOP/dist"
+( cd "$DESKTOP" && npx electron-builder --mac dmg $EB_ARCH "${ICON_ARGS[@]}" )
 
 echo "[4/4] Done."
 echo
-ls -lah "$DESKTOP/dist"/*.dmg 2>/dev/null || true
+if ls "$DESKTOP/dist"/*.dmg >/dev/null 2>&1; then
+  echo "DMG file(s):"
+  ls -lah "$DESKTOP/dist"/*.dmg
+else
+  echo "WARNING: no .dmg found under $DESKTOP/dist"
+  echo "Contents of dist:"
+  ls -la "$DESKTOP/dist" || true
+  exit 1
+fi
 find "$DESKTOP/dist" -name "Turnwise.app" -type d 2>/dev/null | head -5 || true
 echo
 echo "Install: open the .dmg and drag Turnwise into Applications."

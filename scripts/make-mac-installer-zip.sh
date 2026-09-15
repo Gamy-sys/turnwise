@@ -40,11 +40,20 @@ Turnwise for Mac — make a clickable app icon
 2. Double-click:  Install Turnwise.command
    • If macOS blocks it: Right-click → Open → Open
    • A Terminal window opens and builds the app (5–15 min)
+   • Leave the window open until it says SUCCESS
 
-3. When it finishes, a .dmg opens — drag Turnwise into Applications.
+3. The .dmg is NOT on your Mac Desktop.
+   It is created here inside the unzipped folder:
 
-4. Open Turnwise from Applications (or Launchpad / Spotlight).
-   First launch downloads Python packages — wait a few minutes.
+      Turnwise-Mac-Installer / desktop / dist / Turnwise-*.dmg
+
+   ("desktop" = the app builder folder, not your Desktop.)
+
+4. When it finishes, that .dmg should open — drag Turnwise into Applications.
+   If nothing opens: Finder → go into desktop/dist → double-click the .dmg
+
+5. If it fails: open BUILD-LOG.txt in this folder and send it to the person
+   who gave you Turnwise.
 
 Need once on the Mac (Homebrew):
   brew install python@3.12 node ffmpeg
