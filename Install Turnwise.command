@@ -126,7 +126,19 @@ echo "[3/3] Creating clickable Turnwise.app…"
 "$ROOT/scripts/create-mac-app.sh" "$HOME/Applications"
 RC=$?
 
-if [[ $RC -ne 0 || ! -d "$HOME/Applications/Turnwise.app" ]]; then
+# Prefer wherever create-mac-app actually put it (/Applications or ~/Applications)
+APP_PATH=""
+if [[ -f "$HOME/Library/Application Support/Turnwise/app_path.txt" ]]; then
+  APP_PATH="$(tr -d '\r\n' < "$HOME/Library/Application Support/Turnwise/app_path.txt")"
+fi
+for cand in "$APP_PATH" "/Applications/Turnwise.app" "$HOME/Applications/Turnwise.app" "$ROOT/Turnwise.app" "$HOME/Desktop/Turnwise.app"; do
+  if [[ -n "$cand" && -d "$cand" ]]; then
+    APP_PATH="$cand"
+    break
+  fi
+done
+
+if [[ $RC -ne 0 || -z "$APP_PATH" || ! -d "$APP_PATH" ]]; then
   echo "FAILED to create Turnwise.app — see $LOG"
   open -R "$LOG" 2>/dev/null || true
   pause
@@ -138,15 +150,22 @@ echo "============================================"
 echo "  SUCCESS"
 echo "============================================"
 echo
-echo "Turnwise is installed at:"
-echo "  $HOME/Applications/Turnwise.app"
+echo "Turnwise icon is here:"
+echo "  $APP_PATH"
+if [[ -d "$HOME/Desktop/Turnwise.app" ]]; then
+  echo "  $HOME/Desktop/Turnwise.app  (Desktop copy)"
+fi
+echo "  $ROOT/Turnwise.app  (inside the install folder)"
 echo
-echo "Opening Applications — double-click Turnwise."
+echo "IMPORTANT: Finder sidebar \"Applications\" is /Applications."
+echo "If you do not see it there, look on the Desktop or run:"
+echo "  open \"$APP_PATH\""
+echo
 echo "If macOS blocks it: Right-click → Open → Open"
 echo
-open "$HOME/Applications"
-# Try launching once
-open "$HOME/Applications/Turnwise.app" || true
+# Reveal the exact icon in Finder and try to launch
+open -R "$APP_PATH" 2>/dev/null || open "$(dirname "$APP_PATH")" 2>/dev/null || true
+open "$APP_PATH" || true
 echo
 echo "Diarization is ON by default (Hugging Face token bundled)."
 echo "Log: $LOG"

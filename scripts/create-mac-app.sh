@@ -19,6 +19,15 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+# Prefer the system Applications folder when writable; else ~/Applications.
+# Finder's sidebar "Applications" is /Applications — many people miss ~/Applications.
+if [[ "$DEST" == "$HOME/Applications" ]]; then
+  if mkdir -p /Applications 2>/dev/null && [[ -w /Applications ]]; then
+    DEST="/Applications"
+    APP="$DEST/Turnwise.app"
+  fi
+fi
+
 mkdir -p "$SUPPORT" "$DEST"
 echo "$HERE" > "$SUPPORT/install_path.txt"
 
@@ -149,9 +158,20 @@ LOCAL_APP="$HERE/Turnwise.app"
 rm -rf "$LOCAL_APP"
 cp -R "$APP" "$LOCAL_APP"
 
+# Put a copy on the Desktop so it is impossible to miss
+DESKTOP_APP="$HOME/Desktop/Turnwise.app"
+rm -rf "$DESKTOP_APP"
+cp -R "$APP" "$DESKTOP_APP" 2>/dev/null || true
+
+# Remember exact path for the installer success message
+echo "$APP" > "$SUPPORT/app_path.txt"
+
 echo "Created: $APP"
 echo "Also:    $LOCAL_APP"
+if [[ -d "$DESKTOP_APP" ]]; then
+  echo "Desktop: $DESKTOP_APP"
+fi
 echo "Install path saved to: $SUPPORT/install_path.txt"
 echo
-echo "Open Turnwise from Applications / Launchpad, or:"
+echo "Open Turnwise from Applications / Launchpad / Desktop, or:"
 echo "  open \"$APP\""

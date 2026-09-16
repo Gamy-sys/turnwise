@@ -43,7 +43,11 @@ Turnwise for Mac — clickable app icon
    • Leave Terminal open until it says SUCCESS
    • First install can take 10–20 minutes (downloads Python + diarization)
 
-3. When finished, Turnwise.app is in Applications / Launchpad.
+3. When finished, look for Turnwise.app in these places:
+   • Desktop (easiest)
+   • Applications (Finder sidebar) — or Home → Applications
+   • Inside this unzipped folder
+
    Double-click that icon anytime to start Turnwise.
 
 4. Speaker diarization is ON by default (2 speakers).
