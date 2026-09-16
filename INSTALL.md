@@ -82,43 +82,38 @@ Starts the server if needed and opens the default browser.
 
 ---
 
-## macOS app (clickable icon) — build on a Mac
+## macOS app (clickable icon) — recommended
 
-You cannot build the final `.dmg` on Linux. Send your friend the **Mac installer
-zip**, and they build the app on their Mac once.
+Send your friend the **Mac installer zip**. They get a normal **Turnwise** icon
+in Applications — no Electron / no hunting for a `.dmg`.
 
-### You (Linux): create the zip to send
+### You (Linux): create the zip
 
 ```bash
-cd turnwise   # or ca-studio
+cd turnwise
 chmod +x scripts/make-mac-installer-zip.sh
 ./scripts/make-mac-installer-zip.sh ~/Desktop
 ```
 
-Send them: `Turnwise-Mac-Installer-*-*.zip` from the Desktop.
+Send: `Turnwise-Mac-Installer-*-*.zip` from the Desktop.
+
+The zip privately includes your Hugging Face token for speaker diarization
+(not published to the public GitHub repo).
 
 ### Your friend (Mac)
 
-1. Unzip the folder.
-2. Open **START HERE.txt** (or just double-click **Install Turnwise.command**).
-3. If macOS blocks it: **Right-click → Open → Open**.
-4. Wait for the build (5–15 minutes). A `.dmg` opens — **drag Turnwise into Applications**.
-5. Launch **Turnwise** from Applications / Launchpad.
+1. Unzip somewhere permanent (e.g. `Documents/Turnwise`) — **keep this folder**.
+2. Double-click **Install Turnwise.command**
+   - If blocked: **Right-click → Open → Open**
+   - Wait until it says SUCCESS (10–20 min first time)
+3. Open **Turnwise** from Applications / Launchpad anytime.
 
-One-time tools on the Mac (Homebrew):
+Needs Homebrew once: `brew install python@3.12 node ffmpeg`
 
-```bash
-xcode-select --install          # if prompted
-brew install python@3.12 node ffmpeg
-```
+Speaker diarization is **ON by default** (2 speakers) with the bundled HF token.
 
-First app launch installs Python packages under  
-`~/Library/Application Support/Turnwise` — allow a few minutes.
-
-**Gatekeeper tip:** unsigned app → Right-click Turnwise → Open the first time.
-
-**Updates:** the packaged `.app` is a snapshot. For **↻ Update from Git**, prefer a
-`git clone` + `./run.sh`, or send a new installer zip after you push releases.
+**Updates:** `data/` (projects + secrets) is kept if they later use **Update from Git**.
+For a new clickable icon after major releases, send a fresh installer zip.
 
 ---
 

@@ -141,13 +141,17 @@ export default function SettingsPanel({ settings, onChange }) {
       ))}
 
       <h3>Speakers &amp; diarization</h3>
+      <p className="hint">
+        Diarization is <b>on by default</b> (2 speakers). A saved Hugging Face token
+        is used automatically when present.
+      </p>
       <label className="field checkbox">
         <input
           type="checkbox"
           checked={settings.enable_diarization !== false}
           onChange={(e) => set("enable_diarization", e.target.checked)}
         />
-        <span>Diarization + overlap detection (needs Hugging Face token)</span>
+        <span>Diarization + overlap detection</span>
       </label>
       <label className="field">
         <span>Hugging Face token {settings.hf_token === true ? "(saved on server)" : ""}</span>
@@ -162,18 +166,16 @@ export default function SettingsPanel({ settings, onChange }) {
         <input
           type="number"
           min="1"
-          placeholder="auto"
+          placeholder="2"
           value={settings.num_speakers ?? ""}
           onChange={(e) =>
             set("num_speakers", e.target.value ? parseInt(e.target.value, 10) : null)
           }
         />
       </label>
-      {settings.transcript_layout === "japanese_four_line" && (
-        <p className="hint">
-          For Japanese mono recordings, set the speaker count explicitly (e.g. 2) if labels stay on one speaker.
-        </p>
-      )}
+      <p className="hint">
+        Default is 2. Change only if you know the true speaker count.
+      </p>
 
       <h3>OpenAI (optional)</h3>
       <label className="field checkbox">

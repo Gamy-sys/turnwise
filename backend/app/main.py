@@ -43,7 +43,7 @@ from .pipeline.ca import regroup_turns, render_jefferson
 from .pipeline.midi_export import export_midi
 from .pipeline.openai_pass import refine_transcript
 
-app = FastAPI(title="Turnwise", version="0.2.0")
+app = FastAPI(title="Turnwise", version="0.3.0")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )

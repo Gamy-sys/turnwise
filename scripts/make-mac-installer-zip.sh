@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Create a zip you can SEND to a Mac friend.
-# They unzip it, double-click "Install Turnwise.command", and get a Dock/Applications icon.
+# They unzip → double-click Install Turnwise.command → get Turnwise.app in Applications.
 #
-# Usage (on Linux or Mac, from the Turnwise folder):
+# Usage:
 #   ./scripts/make-mac-installer-zip.sh
 #   ./scripts/make-mac-installer-zip.sh ~/Desktop
 set -euo pipefail
@@ -30,38 +30,31 @@ fi
 echo "[2/4] Staging Mac installer tree…"
 mkdir -p "$ROOT"
 
-# Friend-facing instructions (top of the folder)
 cat > "$ROOT/START HERE.txt" <<'EOF'
-Turnwise for Mac — make a clickable app icon
-============================================
+Turnwise for Mac — clickable app icon
+=====================================
 
-1. Unzip this folder (keep everything together).
+1. Unzip this folder and KEEP it somewhere permanent
+   (e.g. Documents/Turnwise). Do not delete it after install —
+   the app icon launches from this folder.
 
 2. Double-click:  Install Turnwise.command
    • If macOS blocks it: Right-click → Open → Open
-   • A Terminal window opens and builds the app (5–15 min)
-   • Leave the window open until it says SUCCESS
+   • Leave Terminal open until it says SUCCESS
+   • First install can take 10–20 minutes (downloads Python + diarization)
 
-3. The .dmg is NOT on your Mac Desktop.
-   It is created here inside the unzipped folder:
+3. When finished, Turnwise.app is in Applications / Launchpad.
+   Double-click that icon anytime to start Turnwise.
 
-      Turnwise-Mac-Installer / desktop / dist / Turnwise-*.dmg
+4. Speaker diarization is ON by default (2 speakers).
+   A Hugging Face token is already bundled for your install.
 
-   ("desktop" = the app builder folder, not your Desktop.)
+If install fails: send BUILD-LOG.txt from this folder.
 
-4. When it finishes, that .dmg should open — drag Turnwise into Applications.
-   If nothing opens: Finder → go into desktop/dist → double-click the .dmg
-
-5. If it fails: open BUILD-LOG.txt in this folder and send it to the person
-   who gave you Turnwise.
-
-Need once on the Mac (Homebrew):
+Need once (Homebrew):
   brew install python@3.12 node ffmpeg
-
-More detail: INSTALL.md
 EOF
 
-# Double-click installer
 cp "$HERE/Install Turnwise.command" "$ROOT/"
 chmod +x "$ROOT/Install Turnwise.command"
 
@@ -70,10 +63,32 @@ for f in run.sh desktop-launch.sh README.md INSTALL.md; do
 done
 chmod +x "$ROOT/run.sh" "$ROOT/desktop-launch.sh" 2>/dev/null || true
 
-mkdir -p "$ROOT/icons" "$ROOT/scripts" "$ROOT/desktop/build"
+mkdir -p "$ROOT/icons" "$ROOT/scripts" "$ROOT/packaging" "$ROOT/desktop/build"
 cp -a "$HERE/icons/." "$ROOT/icons/" 2>/dev/null || true
-cp "$HERE/scripts/build-mac.sh" "$HERE/scripts/make-mac-installer-zip.sh" "$ROOT/scripts/" 2>/dev/null || true
+cp "$HERE/scripts/create-mac-app.sh" \
+   "$HERE/scripts/build-mac.sh" \
+   "$HERE/scripts/make-mac-installer-zip.sh" \
+   "$ROOT/scripts/" 2>/dev/null || true
 chmod +x "$ROOT/scripts/"*.sh "$ROOT/Install Turnwise.command"
+
+# Bundled HF token for diarization (private zip — not in public git)
+if [[ -f "$HERE/packaging/friend-secrets.json" ]]; then
+  cp "$HERE/packaging/friend-secrets.json" "$ROOT/packaging/"
+elif [[ -f "$HERE/data/secrets.json" ]]; then
+  # Extract HF token only from local secrets
+  python3 - <<PY
+import json
+from pathlib import Path
+src = json.loads(Path("$HERE/data/secrets.json").read_text())
+out = {}
+if src.get("hf_token"):
+    out["hf_token"] = src["hf_token"]
+Path("$ROOT/packaging/friend-secrets.json").write_text(json.dumps(out, indent=2) + "\n")
+print("[secrets] packed hf_token for friend install")
+PY
+else
+  echo "WARNING: no HF token found to bundle — friend will need to paste one in Settings"
+fi
 
 # Backend (no venv)
 mkdir -p "$ROOT/backend"
@@ -83,14 +98,14 @@ done
 rsync -a --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
   "$HERE/backend/app/" "$ROOT/backend/app/"
 
-# Frontend dist + sources (build-mac rebuilds; dist is a fallback)
+# Frontend
 mkdir -p "$ROOT/frontend"
 cp "$HERE/frontend/package.json" "$HERE/frontend/package-lock.json" "$ROOT/frontend/"
 cp "$HERE/frontend/vite.config.js" "$HERE/frontend/index.html" "$ROOT/frontend/"
 rsync -a "$HERE/frontend/dist/" "$ROOT/frontend/dist/"
 rsync -a --exclude='node_modules' "$HERE/frontend/src/" "$ROOT/frontend/src/"
 
-# Electron shell
+# Keep desktop/ for optional Electron builds, but primary path is create-mac-app.sh
 for f in main.js preload.js package.json package-lock.json; do
   [[ -f "$HERE/desktop/$f" ]] && cp "$HERE/desktop/$f" "$ROOT/desktop/"
 done
@@ -100,11 +115,6 @@ done
 echo "[3/4] Zipping…"
 mkdir -p "$OUT_DIR"
 ( cd "$STAGING" && zip -r -q "$OUT_DIR/$ZIP_NAME" Turnwise-Mac-Installer )
-
-# Keep execute bits for .command / scripts inside the zip (Info-ZIP attribute)
-# Re-pack with stored permissions if zipinfo shows issues — chmod before zip is enough on Linux→Mac for .command often needs:
-# friend still Right-click Open the first time.
-
 rm -rf "$STAGING"
 SIZE="$(du -h "$OUT_DIR/$ZIP_NAME" | cut -f1)"
 echo
@@ -112,4 +122,5 @@ echo "[4/4] Done."
 echo "Send this file to your friend:"
 echo "  $OUT_DIR/$ZIP_NAME  ($SIZE)"
 echo
-echo "On their Mac: unzip → double-click Install Turnwise.command → drag to Applications."
+echo "On their Mac: unzip → double-click Install Turnwise.command"
+echo "→ Turnwise appears in Applications."

@@ -18,7 +18,9 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
   const [language, setLanguage] = useState(defaults?.language || "");
   const [layout, setLayout] = useState(defaults?.transcript_layout || "standard");
   const [diarize, setDiarize] = useState(defaults?.enable_diarization !== false);
-  const [numSpeakers, setNumSpeakers] = useState("");
+  const [numSpeakers, setNumSpeakers] = useState(
+    defaults?.num_speakers != null ? String(defaults.num_speakers) : "2"
+  );
   const [hfToken, setHfToken] = useState("");
   const [initialPrompt, setInitialPrompt] = useState("");
   const [formats, setFormats] = useState(["txt"]);
@@ -29,7 +31,7 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
     setLanguage(d.language || "");
     setLayout(d.transcript_layout || "standard");
     setDiarize(d.enable_diarization !== false);
-    setNumSpeakers(d.num_speakers ? String(d.num_speakers) : "");
+    setNumSpeakers(d.num_speakers != null ? String(d.num_speakers) : "2");
     setInitialPrompt(d.initial_prompt || "");
     try {
       const raw = localStorage.getItem("tw-batch-formats");

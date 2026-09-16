@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Turnwise - one-command launcher.
-# - Creates/uses a Python venv, installs core deps if missing
+# - Creates/uses a Python venv, installs core + diarization deps if missing
+# - Seeds bundled HF token for speaker labels
 # - Builds the frontend if it hasn't been built
 # - Starts the FastAPI server (which serves the built UI)
 #
@@ -16,6 +17,8 @@ FRONTEND="$HERE/frontend"
 PORT=8000
 DEV=0
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="$2"; shift 2 ;;
@@ -26,7 +29,9 @@ done
 
 # --- ffmpeg check ---
 if ! command -v ffmpeg >/dev/null 2>&1; then
-  echo "ERROR: ffmpeg is required. Install it, e.g.:  sudo apt install ffmpeg"
+  echo "ERROR: ffmpeg is required."
+  echo "  Mac:   brew install ffmpeg"
+  echo "  Linux: sudo apt install ffmpeg"
   exit 1
 fi
 
@@ -41,6 +46,26 @@ if [[ "$PORT" != "$REQ_PORT" ]]; then
   echo "[port] $REQ_PORT is in use — using $PORT instead"
 fi
 
+# --- Seed bundled secrets (friend Mac installer) ---
+mkdir -p "$HERE/data"
+if [[ -f "$HERE/packaging/friend-secrets.json" && ! -f "$HERE/data/secrets.json" ]]; then
+  cp "$HERE/packaging/friend-secrets.json" "$HERE/data/secrets.json"
+  chmod 600 "$HERE/data/secrets.json" 2>/dev/null || true
+  echo "[secrets] bundled Hugging Face token installed for diarization"
+fi
+
+# --- Default global settings: diarization ON ---
+if [[ ! -f "$HERE/data/global_settings.json" ]]; then
+  cat > "$HERE/data/global_settings.json" <<'JSON'
+{
+  "enable_diarization": true,
+  "num_speakers": 2,
+  "whisper_model": "medium"
+}
+JSON
+  echo "[settings] diarization ON, 2 speakers"
+fi
+
 # --- Python venv + deps ---
 if [[ ! -d "$BACKEND/.venv" ]]; then
   echo "[setup] creating Python venv…"
@@ -50,6 +75,15 @@ fi
 if ! "$BACKEND/.venv/bin/python" -c "import faster_whisper, parselmouth, fastapi, docx, pykakasi, sudachipy, openai" >/dev/null 2>&1; then
   echo "[setup] installing backend dependencies…"
   "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements.txt"
+fi
+
+# Diarization (pyannote + torch) — required for speaker labels
+if ! "$BACKEND/.venv/bin/python" -c "import pyannote.audio, torch" >/dev/null 2>&1; then
+  echo "[setup] installing speaker diarization (torch + pyannote) — first time can take several minutes…"
+  "$BACKEND/.venv/bin/pip" install torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
+    || "$BACKEND/.venv/bin/pip" install torch torchaudio
+  "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements-diarization.txt" \
+    || echo "[warn] diarization install incomplete — speaker labels may be unavailable"
 fi
 
 # --- Frontend build ---
@@ -67,6 +101,5 @@ else
     --app-dir "$BACKEND" --host 127.0.0.1 --port "$PORT" --reload &
   BACK_PID=$!
   trap "kill $BACK_PID 2>/dev/null || true" EXIT
-  # Point the Vite dev proxy at the backend port we actually bound to.
   ( cd "$FRONTEND" && CA_BACKEND_PORT="$PORT" npm install && CA_BACKEND_PORT="$PORT" npm run dev )
 fi

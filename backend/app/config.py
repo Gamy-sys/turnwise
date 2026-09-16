@@ -30,11 +30,35 @@ for _p in (DATA_DIR, PROJECTS_DIR, MODEL_CACHE_DIR):
 # so leaving a key field blank in the UI never erases a previously saved key.
 # ---------------------------------------------------------------------------
 SECRETS_FILE = DATA_DIR / "secrets.json"
+# Private Mac/friend installer may ship packaging/friend-secrets.json (gitignored).
+BUNDLED_SECRETS_FILE = PROJECT_DIR / "packaging" / "friend-secrets.json"
 GLOBAL_SETTINGS_FILE = DATA_DIR / "global_settings.json"
 _SECRET_KEYS = ("hf_token", "openai_api_key")
 
 
+def _seed_secrets_from_bundle() -> None:
+    """Copy bundled HF token into data/secrets.json once (friend installs)."""
+    if SECRETS_FILE.exists() or not BUNDLED_SECRETS_FILE.exists():
+        return
+    try:
+        raw = json.loads(BUNDLED_SECRETS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    seed = {k: raw[k] for k in _SECRET_KEYS if isinstance(raw.get(k), str) and raw[k].strip()}
+    if not seed:
+        return
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SECRETS_FILE.write_text(json.dumps(seed, indent=2), encoding="utf-8")
+    try:
+        SECRETS_FILE.chmod(0o600)
+    except OSError:
+        pass
+
+
 def load_secrets() -> dict:
+    _seed_secrets_from_bundle()
     try:
         return json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -55,6 +79,20 @@ def save_secrets(updates: dict) -> None:
             SECRETS_FILE.chmod(0o600)
         except OSError:
             pass
+
+
+def ensure_diarization_defaults(data: dict | None = None) -> dict:
+    """Force speaker diarization ON for new installs / missing keys."""
+    d = dict(data or {})
+    if "enable_diarization" not in d:
+        d["enable_diarization"] = True
+    # Prefer an explicit speaker count when unset — helps mono Japanese mixes.
+    if d.get("num_speakers") in (None, "", 0) and "num_speakers" not in (data or {}):
+        # leave None (auto) unless CA_NUM_SPEAKERS is set
+        env_n = os.environ.get("CA_NUM_SPEAKERS", "").strip()
+        if env_n.isdigit():
+            d["num_speakers"] = int(env_n)
+    return d
 
 
 @dataclass
@@ -137,10 +175,22 @@ class Settings:
     transcript_layout: str = "standard"  # standard | japanese_four_line
     japanese_auto_translate: bool = True
 
-    # Diarization (optional, needs Hugging Face token)
+    # Diarization — ON by default; HF token from env / data/secrets / bundled installer
     enable_diarization: bool = True
-    hf_token: str | None = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
-    num_speakers: int | None = None                                   # None => auto
+    hf_token: str | None = (
+        os.environ.get("HUGGINGFACE_TOKEN")
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("CA_HF_TOKEN")
+    )
+    # Default 2 speakers (works for most interviews / Japanese dialogue).
+    # Set to null in the UI for auto-detect, or CA_NUM_SPEAKERS in the environment.
+    num_speakers: int | None = field(
+        default_factory=lambda: (
+            int(os.environ["CA_NUM_SPEAKERS"])
+            if os.environ.get("CA_NUM_SPEAKERS", "").strip().isdigit()
+            else 2
+        )
+    )
     # pyannote pipeline to use. community-1 is the pyannote 4.x native model;
     # 3.1 is kept as an automatic fallback for older setups.
     diarization_model: str = os.environ.get(
@@ -163,12 +213,15 @@ class Settings:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Settings":
-        data = dict(data or {})
+        data = ensure_diarization_defaults(dict(data or {}))
         th = data.pop("thresholds", None)
         s = cls()
         for k, v in data.items():
             if hasattr(s, k) and k not in ("hf_token", "openai_api_key"):
                 setattr(s, k, v)
+        # Hard default: speaker diarization stays on unless explicitly disabled.
+        if data.get("enable_diarization") is None:
+            s.enable_diarization = True
         # Only overwrite secrets when a real string is supplied; newly supplied
         # keys are persisted so they are never lost between sessions.
         if isinstance(data.get("hf_token"), str) and data["hf_token"].strip():
@@ -208,7 +261,13 @@ def save_global_settings_dict(data: dict) -> None:
 
 def merged_defaults() -> Settings:
     """Server-wide defaults (Simple mode + new uploads), including saved secrets."""
-    return Settings.from_dict(load_global_settings_dict())
+    raw = dict(load_global_settings_dict())
+    # Hard defaults for Turnwise 0.3+: diarization on, two speakers.
+    if raw.get("enable_diarization") is not False:
+        raw["enable_diarization"] = True
+    if raw.get("num_speakers") in (None, ""):
+        raw["num_speakers"] = 2
+    return Settings.from_dict(raw)
 
 
 DEFAULT_SETTINGS = merged_defaults()

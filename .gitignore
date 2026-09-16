@@ -14,8 +14,11 @@ desktop/dist-*/
 # Runtime data (uploads, WAVs, transcripts, downloaded models, secrets)
 data/
 **/secrets.json
+packaging/friend-secrets.json
 .env
 .env.*
+Turnwise.app/
+*.app/
 
 # Logs / scratch
 server.log

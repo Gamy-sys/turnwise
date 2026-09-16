@@ -209,6 +209,18 @@ def _run(project_id: str, source_path: Path, settings: Settings):
     from .pipeline.diarization import DiarResult
 
     pdir = project_dir(project_id)
+    # Speaker diarization is hard-on for Turnwise 0.3+ unless explicitly disabled
+    # in the request. Ensure HF token is loaded from the secrets store.
+    if getattr(settings, "enable_diarization", True) is not False:
+        settings.enable_diarization = True
+    if not getattr(settings, "hf_token", None):
+        from .config import load_secrets
+        tok = load_secrets().get("hf_token")
+        if tok:
+            settings.hf_token = tok
+    if getattr(settings, "num_speakers", None) in (None, 0) and settings.enable_diarization:
+        # Keep auto if user cleared the field; otherwise default was already 2.
+        pass
     if getattr(settings, "transcript_layout", "standard") == "japanese_four_line":
         # Japanese mode is explicit; don't leave language detection to a short
         # backchannel-heavy excerpt. CrisperWhisper is English-focused.
