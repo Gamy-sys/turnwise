@@ -50,6 +50,10 @@ Turnwise for Mac — clickable app icon
 
    Double-click that icon anytime to start Turnwise.
 
+   If the icon says the UI is not ready: double-click
+   "Start Turnwise.command" in this folder instead.
+   A Terminal window will show progress, then open the browser.
+
 4. Speaker diarization is ON by default (2 speakers).
    A Hugging Face token is already bundled for your install.
 
@@ -65,7 +69,8 @@ chmod +x "$ROOT/Install Turnwise.command"
 for f in run.sh desktop-launch.sh README.md INSTALL.md; do
   [[ -f "$HERE/$f" ]] && cp "$HERE/$f" "$ROOT/"
 done
-chmod +x "$ROOT/run.sh" "$ROOT/desktop-launch.sh" 2>/dev/null || true
+[[ -f "$HERE/Start Turnwise.command" ]] && cp "$HERE/Start Turnwise.command" "$ROOT/"
+chmod +x "$ROOT/run.sh" "$ROOT/desktop-launch.sh" "$ROOT/Start Turnwise.command" 2>/dev/null || true
 
 mkdir -p "$ROOT/icons" "$ROOT/scripts" "$ROOT/packaging" "$ROOT/desktop/build"
 cp -a "$HERE/icons/." "$ROOT/icons/" 2>/dev/null || true
@@ -73,7 +78,7 @@ cp "$HERE/scripts/create-mac-app.sh" \
    "$HERE/scripts/build-mac.sh" \
    "$HERE/scripts/make-mac-installer-zip.sh" \
    "$ROOT/scripts/" 2>/dev/null || true
-chmod +x "$ROOT/scripts/"*.sh "$ROOT/Install Turnwise.command"
+chmod +x "$ROOT/scripts/"*.sh "$ROOT/Install Turnwise.command" "$ROOT/Start Turnwise.command" 2>/dev/null || true
 
 # Bundled HF token for diarization (private zip — not in public git)
 if [[ -f "$HERE/packaging/friend-secrets.json" ]]; then

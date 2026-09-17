@@ -36,7 +36,10 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 # --- pick a free port (auto-bump if the requested one is taken) ---
-port_busy() { timeout 0.4 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null; }
+# Avoid GNU `timeout` (missing on many Macs). Use bash /dev/tcp only.
+port_busy() {
+  (exec 3<>/dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1
+}
 REQ_PORT="$PORT"
 for i in $(seq 0 20); do
   CAND=$((REQ_PORT + i))
@@ -77,14 +80,17 @@ if ! "$BACKEND/.venv/bin/python" -c "import faster_whisper, parselmouth, fastapi
   "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements.txt"
 fi
 
-# Diarization (pyannote + torch) — required for speaker labels
-if ! "$BACKEND/.venv/bin/python" -c "import pyannote.audio, torch" >/dev/null 2>&1; then
+# Diarization (pyannote + torch) — light check (find_spec) so we don't load torch every launch
+if ! "$BACKEND/.venv/bin/python" -c "import importlib.util as u; import sys; sys.exit(0 if u.find_spec('pyannote.audio') and u.find_spec('torch') else 1)"; then
   echo "[setup] installing speaker diarization (torch + pyannote) — first time can take several minutes…"
   "$BACKEND/.venv/bin/pip" install torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
     || "$BACKEND/.venv/bin/pip" install torch torchaudio
   "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements-diarization.txt" \
     || echo "[warn] diarization install incomplete — speaker labels may be unavailable"
 fi
+
+# Write the chosen port so the Mac .app can find us without guessing
+echo "$PORT" > "$HERE/data/last_port.txt"
 
 # --- Frontend build ---
 if [[ $DEV -eq 0 ]]; then
@@ -93,6 +99,7 @@ if [[ $DEV -eq 0 ]]; then
     ( cd "$FRONTEND" && npm install && npm run build )
   fi
   echo "[run] Turnwise on http://127.0.0.1:$PORT"
+  echo "[run] (first start can take 1–3 minutes while Python loads)"
   exec "$BACKEND/.venv/bin/python" -m uvicorn app.main:app \
     --app-dir "$BACKEND" --host 127.0.0.1 --port "$PORT"
 else

@@ -21,7 +21,8 @@ notify() {
 }
 
 port_busy() {
-  timeout 0.4 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" 2>/dev/null
+  # Avoid GNU `timeout` (missing on many Macs).
+  (exec 3<>/dev/tcp/127.0.0.1/"$1") >/dev/null 2>&1
 }
 
 http_ok() {

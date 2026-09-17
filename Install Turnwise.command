@@ -97,7 +97,7 @@ PY
 
 echo
 echo "[1/3] First-time Python setup (can take several minutes)…"
-chmod +x "$ROOT/run.sh" "$ROOT/scripts/"*.sh 2>/dev/null || true
+chmod +x "$ROOT/run.sh" "$ROOT/scripts/"*.sh "$ROOT/Start Turnwise.command" 2>/dev/null || true
 # Pre-create venv + install core + diarization so first click is faster
 if [[ ! -d "$ROOT/backend/.venv" ]]; then
   python3 -m venv "$ROOT/backend/.venv"
