@@ -78,7 +78,7 @@ if [[ -f "$ROOT/packaging/friend-secrets.json" ]]; then
   fi
 fi
 
-# Default settings: diarization ON, 2 speakers
+# Default settings: diarization ON, 4 speakers
 python3 - <<'PY' || true
 import json
 from pathlib import Path
@@ -88,11 +88,13 @@ if p.exists():
     try: cfg = json.loads(p.read_text())
     except Exception: cfg = {}
 cfg["enable_diarization"] = True
-cfg.setdefault("num_speakers", 2)
+cfg.setdefault("num_speakers", 4)
 cfg.setdefault("whisper_model", "medium")
+cfg.setdefault("per_speaker_asr", True)
+cfg.setdefault("hybrid_mix_asr", True)
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(json.dumps(cfg, indent=2))
-print("[settings] diarization=ON, num_speakers=2")
+print("[settings] diarization=ON, num_speakers=4")
 PY
 
 echo

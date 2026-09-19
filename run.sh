@@ -62,11 +62,13 @@ if [[ ! -f "$HERE/data/global_settings.json" ]]; then
   cat > "$HERE/data/global_settings.json" <<'JSON'
 {
   "enable_diarization": true,
-  "num_speakers": 2,
-  "whisper_model": "medium"
+  "num_speakers": 4,
+  "whisper_model": "medium",
+  "per_speaker_asr": true,
+  "hybrid_mix_asr": true
 }
 JSON
-  echo "[settings] diarization ON, 2 speakers"
+  echo "[settings] diarization ON, 4 speakers"
 fi
 
 # --- Python venv + deps ---

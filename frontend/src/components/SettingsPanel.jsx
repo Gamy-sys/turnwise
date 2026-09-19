@@ -26,6 +26,12 @@ export default function SettingsPanel({ settings, onChange }) {
                 layout === "japanese_four_line"
                   ? "large-v3"
                   : settings.whisper_model,
+              num_speakers:
+                layout === "japanese_four_line"
+                  ? (settings.num_speakers && settings.num_speakers !== 2
+                      ? settings.num_speakers
+                      : 4)
+                  : settings.num_speakers,
               verbatim: true,
               vad_filter: false,
               thresholds: {
@@ -143,8 +149,8 @@ export default function SettingsPanel({ settings, onChange }) {
 
       <h3>Speakers &amp; diarization</h3>
       <p className="hint">
-        Diarization is <b>on by default</b> (2 speakers). A saved Hugging Face token
-        is used automatically when present.
+        Diarization is <b>on by default</b> (4 speakers). A saved Hugging Face token
+        is used automatically when present. Overlapping talk is transcribed per speaker.
       </p>
       <label className="field checkbox">
         <input
@@ -167,7 +173,7 @@ export default function SettingsPanel({ settings, onChange }) {
         <input
           type="number"
           min="1"
-          placeholder="2"
+          placeholder="4"
           value={settings.num_speakers ?? ""}
           onChange={(e) =>
             set("num_speakers", e.target.value ? parseInt(e.target.value, 10) : null)
@@ -175,8 +181,8 @@ export default function SettingsPanel({ settings, onChange }) {
         />
       </label>
       <p className="hint">
-        Set this to the real count (e.g. 4 for a four-party Japanese conversation).
-        Wrong values merge speakers. Overlapping talk is transcribed per speaker.
+        Default is 4. Set the real count for your recording (e.g. 2 for an interview).
+        Wrong values merge speakers.
       </p>
 
       <h3>OpenAI (optional)</h3>

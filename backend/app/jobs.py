@@ -225,6 +225,8 @@ def _run(project_id: str, source_path: Path, settings: Settings):
         # Japanese mode is explicit; don't leave language detection to a short
         # backchannel-heavy excerpt. CrisperWhisper is English-focused.
         settings.language = "ja"
+        settings.per_speaker_asr = True
+        settings.hybrid_mix_asr = True
         model_l = (settings.whisper_model or "").lower()
         if (
             settings.whisper_model == "nyrahealth/faster_CrisperWhisper"
@@ -246,9 +248,15 @@ def _run(project_id: str, source_path: Path, settings: Settings):
         # seconds-per-Latin-character heuristic grossly over-marks normal words.
         # Preserve manual colons, but do not invent unreliable automatic ones.
         settings.thresholds.enable_elongation = False
+        # Multi-party CA: legacy default was 2 speakers — bump so Update installs
+        # actually diarize four voices without a manual Settings edit.
+        if settings.num_speakers in (None, 0):
+            settings.num_speakers = 4
     elif (settings.language or "").lower().startswith("ja"):
         # Same ASR upgrades when language is forced to Japanese without the
         # four-line layout (e.g. Simple batch with Language=ja).
+        settings.per_speaker_asr = True
+        settings.hybrid_mix_asr = True
         if settings.whisper_model in ("tiny", "base", "small", "medium"):
             settings.whisper_model = "large-v3"
         prompt = (getattr(settings, "initial_prompt", None) or "").strip()
@@ -257,6 +265,8 @@ def _run(project_id: str, source_path: Path, settings: Settings):
                 "日本語の会話。うん、えー、あの、でも、だから、じゃん、しょ、"
                 "ね、さ、凡人、うざい、つまんない、面白くない。"
             )
+        if settings.num_speakers in (None, 0):
+            settings.num_speakers = 4
     # persist settings used for this run
     (pdir / "settings.json").write_text(json.dumps(settings.to_dict(), indent=2), encoding="utf-8")
 

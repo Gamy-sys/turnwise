@@ -95,6 +95,32 @@ def ensure_diarization_defaults(data: dict | None = None) -> dict:
     return d
 
 
+def migrate_speaker_defaults(data: dict) -> tuple[dict, bool]:
+    """One-time bump of the old default (2 speakers) → 4.
+
+    Saved data/global_settings.json is gitignored, so Update from Git never
+    changed behavior for existing installs. Treat the product default of 2 as
+    stale once; explicit 1/3/5+ and a later user choice of 2 (after migration)
+    are left alone.
+    """
+    d = dict(data or {})
+    changed = False
+    if not d.get("_speakers_default_v4"):
+        if d.get("num_speakers") in (None, "", 2):
+            d["num_speakers"] = 4
+            changed = True
+        d["_speakers_default_v4"] = True
+        changed = True
+    # New installs / missing layout: Japanese CA is the primary workflow.
+    if "per_speaker_asr" not in d:
+        d["per_speaker_asr"] = True
+        changed = True
+    if "hybrid_mix_asr" not in d:
+        d["hybrid_mix_asr"] = True
+        changed = True
+    return d, changed
+
+
 @dataclass
 class CAThresholds:
     """Tunable thresholds used when converting measurements into CA symbols."""
@@ -187,13 +213,13 @@ class Settings:
         or os.environ.get("HF_TOKEN")
         or os.environ.get("CA_HF_TOKEN")
     )
-    # Default 2 speakers (works for most interviews / Japanese dialogue).
-    # Set to null in the UI for auto-detect, or CA_NUM_SPEAKERS in the environment.
+    # Default 4 speakers (multi-party Japanese CA). Blank in the UI = auto-detect.
+    # Override with CA_NUM_SPEAKERS or Settings.
     num_speakers: int | None = field(
         default_factory=lambda: (
             int(os.environ["CA_NUM_SPEAKERS"])
             if os.environ.get("CA_NUM_SPEAKERS", "").strip().isdigit()
-            else 2
+            else 4
         )
     )
     # pyannote pipeline to use. community-1 is the pyannote 4.x native model;
@@ -261,17 +287,40 @@ def load_global_settings_dict() -> dict:
 
 
 def save_global_settings_dict(data: dict) -> None:
-    GLOBAL_SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    existing = load_global_settings_dict()
+    out = dict(data or {})
+    # Keep one-time migration markers across UI saves (to_dict omits them).
+    for key in ("_speakers_default_v4",):
+        if key in existing and key not in out:
+            out[key] = existing[key]
+    GLOBAL_SETTINGS_FILE.write_text(json.dumps(out, indent=2), encoding="utf-8")
 
 
 def merged_defaults() -> Settings:
     """Server-wide defaults (Simple mode + new uploads), including saved secrets."""
     raw = dict(load_global_settings_dict())
-    # Hard defaults for Turnwise 0.3+: diarization on, two speakers.
+    raw, migrated = migrate_speaker_defaults(raw)
+    # Hard defaults for Turnwise 0.3+: diarization on, four speakers.
     if raw.get("enable_diarization") is not False:
         raw["enable_diarization"] = True
     if raw.get("num_speakers") in (None, ""):
-        raw["num_speakers"] = 2
+        raw["num_speakers"] = 4
+    if migrated:
+        try:
+            # Persist migration so Update-from-Git installs pick up 4 speakers
+            # without requiring a manual Settings change.
+            disk = load_global_settings_dict()
+            disk["num_speakers"] = raw.get("num_speakers", 4)
+            disk["_speakers_default_v4"] = True
+            disk["per_speaker_asr"] = raw.get("per_speaker_asr", True)
+            disk["hybrid_mix_asr"] = raw.get("hybrid_mix_asr", True)
+            GLOBAL_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            GLOBAL_SETTINGS_FILE.write_text(
+                json.dumps(disk, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
     return Settings.from_dict(raw)
 
 

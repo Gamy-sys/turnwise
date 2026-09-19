@@ -19,7 +19,7 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
   const [layout, setLayout] = useState(defaults?.transcript_layout || "standard");
   const [diarize, setDiarize] = useState(defaults?.enable_diarization !== false);
   const [numSpeakers, setNumSpeakers] = useState(
-    defaults?.num_speakers != null ? String(defaults.num_speakers) : "2"
+    defaults?.num_speakers != null ? String(defaults.num_speakers) : "4"
   );
   const [hfToken, setHfToken] = useState("");
   const [initialPrompt, setInitialPrompt] = useState("");
@@ -31,7 +31,7 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
     setLanguage(d.language || "");
     setLayout(d.transcript_layout || "standard");
     setDiarize(d.enable_diarization !== false);
-    setNumSpeakers(d.num_speakers != null ? String(d.num_speakers) : "2");
+    setNumSpeakers(d.num_speakers != null ? String(d.num_speakers) : "4");
     setInitialPrompt(d.initial_prompt || "");
     try {
       const raw = localStorage.getItem("tw-batch-formats");
@@ -277,6 +277,10 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
                 setLayout(v);
                 if (v === "japanese_four_line") {
                   setLanguage("ja");
+                  setNumSpeakers((n) => (!n || n === "2" ? "4" : n));
+                  if (model === "tiny" || model === "base" || model === "small" || model === "medium") {
+                    setModel("large-v3");
+                  }
                   if (!formats.includes("docx")) setFormats((f) => [...f, "docx"]);
                 }
               }}
