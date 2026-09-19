@@ -115,6 +115,51 @@ def _git(root: Path, *args: str, timeout: int = 120) -> tuple[int, str]:
     return _run(["git", "-C", str(root), *args], timeout=timeout)
 
 
+def _preserve_clean_excludes() -> list[str]:
+    """Paths git clean must never delete (user data + heavy local installs)."""
+    return [
+        "data",
+        "backend/.venv",
+        "frontend/node_modules",
+        "frontend/dist",
+        "desktop/node_modules",
+        "desktop/dist",
+        "dist-mac",
+        "BUILD-LOG.txt",
+        ".turnwise-server.log",
+        ".turnwise-server.pid",
+        ".turnwise.port",
+        "packaging/friend-secrets.json",
+    ]
+
+
+def _make_tree_safe_for_checkout(root: Path) -> tuple[bool, str]:
+    """Drop local app-file conflicts so checkout/reset can reach origin.
+
+    Zip installs and Mac reinstalls leave untracked copies of frontend/, run.sh,
+    etc. Git refuses to overwrite those on checkout. User projects and secrets
+    live under data/ and are excluded.
+    """
+    logs: list[str] = []
+    # Discard tracked local edits when a commit exists
+    code, _ = _git(root, "rev-parse", "--verify", "HEAD")
+    if code == 0:
+        code, out = _git(root, "reset", "--hard", "HEAD")
+        if code != 0:
+            logs.append(out[-300:])
+        else:
+            logs.append("reset local tracked edits")
+
+    clean_args = ["clean", "-fd"]
+    for excl in _preserve_clean_excludes():
+        clean_args.extend(["-e", excl])
+    code, out = _git(root, *clean_args, timeout=180)
+    if code != 0:
+        return False, f"git clean failed: {out[-500:]}"
+    logs.append("cleared conflicting untracked app files (data/ kept)")
+    return True, "; ".join(logs)
+
+
 def _short(s: str, n: int = 7) -> str:
     s = (s or "").strip()
     return s[:n] if s else ""
@@ -337,10 +382,16 @@ def connect_remote(remote_url: str, branch: str = "main") -> dict:
     # If no commits yet locally, just check out tracking branch
     code, _ = _git(root, "rev-parse", "--verify", "HEAD")
     if code != 0:
+        ok_clean, clean_msg = _make_tree_safe_for_checkout(root)
+        if not ok_clean:
+            return {"ok": False, "message": clean_msg}
         code, out = _git(root, "checkout", "-B", branch, ref)
         if code != 0:
             return {"ok": False, "message": f"Checkout failed: {out[-500:]}"}
     else:
+        ok_clean, clean_msg = _make_tree_safe_for_checkout(root)
+        if not ok_clean:
+            return {"ok": False, "message": clean_msg}
         code, out = _git(root, "checkout", "-B", branch, ref)
         if code != 0:
             # fall back to reset --hard of tracked files only
@@ -423,8 +474,13 @@ def apply_update() -> dict:
         # Prefer fast-forward only so we never invent merge commits for the friend
         code, out = _git(root, "merge", "--ff-only", ref, timeout=180)
         if code != 0:
-            # If dirty only in ignored paths, reset tracked files
+            ok_clean, clean_msg = _make_tree_safe_for_checkout(root)
+            _job["log"].append(clean_msg)
             code2, out2 = _git(root, "reset", "--hard", ref, timeout=120)
+            if code2 != 0 and ok_clean:
+                # Untracked blockers may remain after soft failure; try once more
+                _make_tree_safe_for_checkout(root)
+                code2, out2 = _git(root, "reset", "--hard", ref, timeout=120)
             if code2 != 0:
                 _job = {
                     "state": "error",
@@ -434,8 +490,10 @@ def apply_update() -> dict:
                 return {
                     "ok": False,
                     "message": (
-                        "Could not update — local changes conflict with the remote. "
-                        "Commit or stash them, or reset manually."
+                        "Could not update — local files conflict with the remote. "
+                        "In Terminal, from the Turnwise folder, run:\n"
+                        "  git fetch origin && git clean -fd -e data -e backend/.venv "
+                        "-e frontend/node_modules && git reset --hard origin/main"
                     ),
                     "detail": (out + "\n" + out2)[-800:],
                     "job": _job,
