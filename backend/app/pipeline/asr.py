@@ -216,3 +216,251 @@ def transcribe(wav_path: str, settings, progress=None, cancel_check=None) -> ASR
     if (info.language or settings.language or "").lower().startswith("ja"):
         words = _segment_japanese_words(words)
     return ASRResult(language=info.language, words=words, model_name=settings.whisper_model)
+
+
+def _load_mono_wav(wav_path: str):
+    import numpy as np
+    import soundfile as sf
+
+    data, sr = sf.read(wav_path, dtype="float32", always_2d=True)
+    mono = data.mean(axis=1) if data.shape[1] > 1 else data[:, 0]
+    return np.ascontiguousarray(mono), int(sr)
+
+
+def _mask_speaker_audio(audio, sr: int, segments, speaker: str):
+    """Keep only regions labeled `speaker`; silence everything else.
+
+    Preserves the original timeline so word timestamps stay aligned with the
+    source video. Critical for overlapping multi-party conversation: a single
+    mixed-track ASR pass drops or mishears concurrent speech.
+    """
+    import numpy as np
+
+    out = np.zeros_like(audio)
+    kept = 0.0
+    for start, end, label in segments:
+        if label != speaker:
+            continue
+        a = max(0, int(float(start) * sr))
+        b = min(len(audio), int(float(end) * sr))
+        if b > a:
+            out[a:b] = audio[a:b]
+            kept += (b - a) / sr
+    return out, kept
+
+
+def _word_on_speaker(word: ASRWord, segments, speaker: str, min_overlap: float = 0.04) -> bool:
+    """Drop Whisper hallucinations that fall in silence for this speaker."""
+    for start, end, label in segments:
+        if label != speaker:
+            continue
+        ov = min(end, word.end) - max(start, word.start)
+        if ov >= min_overlap:
+            return True
+    # Very short backchannels near a segment edge
+    mid = (word.start + word.end) / 2.0
+    for start, end, label in segments:
+        if label != speaker:
+            continue
+        if start - 0.08 <= mid <= end + 0.08:
+            return True
+    return False
+
+
+def _norm_ja(text: str) -> str:
+    import re
+    t = (text or "").strip().lower()
+    t = re.sub(r"[\s、。,.，．!?！？:：;；「」『』\-—~〜・]+", "", t)
+    return t
+
+
+def _filter_crosstalk_bleed(words: list[ASRWord], segments) -> list[ASRWord]:
+    """When two speakers get the same hypothesis in an overlap, keep one.
+
+    Masked mono ASR often reprints the louder talker's words onto the quieter
+    speaker's track. Prefer the speaker with more exclusive (non-overlapped)
+    diarization coverage under the word.
+    """
+    if len(words) < 2:
+        return words
+
+    def exclusive_coverage(w: ASRWord, speaker: str) -> float:
+        total = 0.0
+        for s, e, lbl in segments:
+            if lbl != speaker:
+                continue
+            ov = min(e, w.end) - max(s, w.start)
+            if ov <= 0:
+                continue
+            claimed = ov
+            for s2, e2, lbl2 in segments:
+                if lbl2 == speaker:
+                    continue
+                other = min(e2, w.end, e) - max(s2, w.start, s)
+                if other > 0:
+                    claimed -= other
+            total += max(0.0, claimed)
+        return total
+
+    drop: set[int] = set()
+    for i, a in enumerate(words):
+        if i in drop or not a.speaker:
+            continue
+        na = _norm_ja(a.text)
+        if len(na) < 2:
+            continue
+        a_mid = (a.start + a.end) / 2.0
+        for j in range(i + 1, len(words)):
+            if j in drop:
+                continue
+            b = words[j]
+            if not b.speaker or b.speaker == a.speaker:
+                continue
+            b_mid = (b.start + b.end) / 2.0
+            if abs(a_mid - b_mid) > 0.65:
+                continue
+            nb = _norm_ja(b.text)
+            if not nb:
+                continue
+            similar = na == nb or (len(na) >= 2 and (na in nb or nb in na))
+            if not similar:
+                continue
+            ca = exclusive_coverage(a, a.speaker)
+            cb = exclusive_coverage(b, b.speaker)
+            if ca >= cb:
+                drop.add(j)
+            else:
+                drop.add(i)
+                break
+    return [w for i, w in enumerate(words) if i not in drop]
+
+
+def transcribe_per_speaker(
+    wav_path: str,
+    segments: list,
+    settings,
+    progress=None,
+    cancel_check=None,
+) -> ASRResult:
+    """ASR each diarized speaker on a masked copy of the mono mix.
+
+    Overlapping talk (common in Japanese CA recordings) is recovered because
+    each speaker is transcribed without the other voices in the mix.
+    """
+    import os
+    import tempfile
+    import soundfile as sf
+
+    if not segments:
+        return transcribe(wav_path, settings, progress=progress, cancel_check=cancel_check)
+
+    labels = sorted({lbl for _, _, lbl in segments})
+    if len(labels) < 2:
+        res = transcribe(wav_path, settings, progress=progress, cancel_check=cancel_check)
+        for w in res.words:
+            w.speaker = labels[0] if labels else "A"
+        return res
+
+    audio, sr = _load_mono_wav(wav_path)
+    all_words: list[ASRWord] = []
+    lang = None
+    n = len(labels)
+
+    for idx, label in enumerate(labels):
+        if cancel_check and cancel_check():
+            raise ASRCancelled("Transcription aborted by user")
+        masked, kept = _mask_speaker_audio(audio, sr, segments, label)
+        if kept < 0.08:
+            if progress:
+                progress((idx + 1) / n, f"Skip quiet speaker {label}")
+            continue
+
+        def speaker_cb(frac, msg="", _i=idx, _l=label):
+            if progress:
+                progress((_i + max(0.0, min(frac, 1.0))) / n, msg or f"Transcribing speaker {_l}")
+
+        fd, tmp = tempfile.mkstemp(suffix=f"_{label}.wav")
+        os.close(fd)
+        try:
+            sf.write(tmp, masked, sr)
+            res = transcribe(tmp, settings, progress=speaker_cb, cancel_check=cancel_check)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+        lang = lang or res.language
+        for w in res.words:
+            if not w.text or not w.text.strip():
+                continue
+            if not _word_on_speaker(w, segments, label):
+                continue
+            w.speaker = label
+            all_words.append(w)
+
+    all_words.sort(key=lambda w: (w.start, w.end, w.speaker or ""))
+    all_words = _filter_crosstalk_bleed(all_words, segments)
+    return ASRResult(
+        language=lang or (settings.language or "en"),
+        words=all_words,
+        model_name=settings.whisper_model,
+    )
+
+
+def merge_mix_gap_words(
+    per_speaker: ASRResult,
+    mix: ASRResult,
+    segments: list,
+    min_gap: float = 0.12,
+) -> ASRResult:
+    """Add full-mix words that are not already covered by per-speaker ASR.
+
+    Quiet or briefly diarized talk sometimes appears only in the mixed track.
+    Speaker labels come from diarization overlap. Same-time words with
+    *different* text are kept (true overlap); near-duplicate reprints are not.
+    """
+    from .diarization import speaker_for_interval
+
+    kept = list(per_speaker.words)
+    for w in mix.words:
+        if not w.text or not w.text.strip():
+            continue
+        nw = _norm_ja(w.text)
+        collide = False
+        for e in kept:
+            ov = min(e.end, w.end) - max(e.start, w.start)
+            if ov < min(min_gap, max(0.05, (w.end - w.start) * 0.4)):
+                continue
+            ne = _norm_ja(e.text)
+            # Duplicate hypothesis in the same span — skip.
+            if nw and ne and (nw == ne or nw in ne or ne in nw):
+                collide = True
+                break
+            # Same speaker already covering this instant — skip unless novel.
+            if e.speaker and ov > 0.08 and nw and ne and nw == ne:
+                collide = True
+                break
+        if collide:
+            continue
+        # Also skip if an existing word already contains this mix token nearby
+        covered = False
+        for e in kept:
+            if abs(((e.start + e.end) / 2) - ((w.start + w.end) / 2)) > 0.55:
+                continue
+            ne = _norm_ja(e.text)
+            if nw and ne and (nw == ne or (len(nw) >= 2 and nw in ne)):
+                covered = True
+                break
+        if covered:
+            continue
+        label = speaker_for_interval(segments, w.start, w.end, default="A")
+        w.speaker = label
+        kept.append(w)
+    kept.sort(key=lambda x: (x.start, x.end, x.speaker or ""))
+    kept = _filter_crosstalk_bleed(kept, segments)
+    return ASRResult(
+        language=per_speaker.language or mix.language,
+        words=kept,
+        model_name=per_speaker.model_name,
+    )

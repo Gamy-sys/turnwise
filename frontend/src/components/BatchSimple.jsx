@@ -102,7 +102,9 @@ export default function BatchSimple({ defaults, onToast, onOpenProject }) {
     if (hfToken.trim()) settings.hf_token = hfToken.trim();
     if (layout === "japanese_four_line") {
       settings.language = "ja";
-      settings.whisper_model = model === "tiny" || model === "base" ? "large-v3" : model;
+      settings.whisper_model = model === "tiny" || model === "base" || model === "small" || model === "medium"
+        ? "large-v3"
+        : model;
     }
     return settings;
   };

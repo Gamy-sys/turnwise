@@ -225,15 +225,38 @@ def _run(project_id: str, source_path: Path, settings: Settings):
         # Japanese mode is explicit; don't leave language detection to a short
         # backchannel-heavy excerpt. CrisperWhisper is English-focused.
         settings.language = "ja"
+        model_l = (settings.whisper_model or "").lower()
         if (
             settings.whisper_model == "nyrahealth/faster_CrisperWhisper"
-            or "kotoba-whisper" in settings.whisper_model.lower()
+            or "kotoba-whisper" in model_l
+            or settings.whisper_model in ("tiny", "base", "small", "medium")
         ):
+            # medium+ below large-v3 miss too much casual overlapping Japanese.
             settings.whisper_model = "large-v3"
+        # Bias toward conversational Japanese (fillers + CA-style lexis).
+        prompt = (getattr(settings, "initial_prompt", None) or "").strip()
+        if not prompt or prompt.lower() in {"alice, bob", "alice bob"}:
+            settings.initial_prompt = (
+                "日本語の会話。うん、えー、あの、でも、だから、じゃん、しょ、"
+                "ね、さ、凡人、うざい、つまんない、面白くない。"
+            )
+        if getattr(settings, "beam_size", 5) < 5:
+            settings.beam_size = 5
         # Whisper's Japanese "word" timings are morpheme spans, so the generic
         # seconds-per-Latin-character heuristic grossly over-marks normal words.
         # Preserve manual colons, but do not invent unreliable automatic ones.
         settings.thresholds.enable_elongation = False
+    elif (settings.language or "").lower().startswith("ja"):
+        # Same ASR upgrades when language is forced to Japanese without the
+        # four-line layout (e.g. Simple batch with Language=ja).
+        if settings.whisper_model in ("tiny", "base", "small", "medium"):
+            settings.whisper_model = "large-v3"
+        prompt = (getattr(settings, "initial_prompt", None) or "").strip()
+        if not prompt or prompt.lower() in {"alice, bob", "alice bob"}:
+            settings.initial_prompt = (
+                "日本語の会話。うん、えー、あの、でも、だから、じゃん、しょ、"
+                "ね、さ、凡人、うざい、つまんない、面白くない。"
+            )
     # persist settings used for this run
     (pdir / "settings.json").write_text(json.dumps(settings.to_dict(), indent=2), encoding="utf-8")
 
@@ -323,9 +346,39 @@ def _run(project_id: str, source_path: Path, settings: Settings):
 
             check_cancel(project_id)
             cb = stage_progress("asr", _STAGES[2][1])
-            asr_res = asr_mod.transcribe(
-                str(wav), settings, progress=cb, cancel_check=cancel_check,
+            # Mono multi-party (esp. overlapping Japanese CA): ASR each
+            # diarized speaker on a masked track so concurrent speech is not
+            # collapsed into one Whisper hypothesis.
+            use_per_spk = (
+                getattr(settings, "per_speaker_asr", True)
+                and diar.available
+                and len({lbl for _, _, lbl in diar.segments}) >= 2
             )
+            if use_per_spk:
+                cb(0.02, "Per-speaker ASR (overlap-aware)")
+                asr_res = asr_mod.transcribe_per_speaker(
+                    str(wav), diar.segments, settings,
+                    progress=lambda f, m="": cb(0.05 + 0.7 * f, m),
+                    cancel_check=cancel_check,
+                )
+                # Fill gaps: a full-mix pass can still catch quiet/overlapped
+                # words the masked tracks missed (common in CA laughter + soft
+                # backchannels). Keep only mix words that do not collide with
+                # an existing per-speaker hypothesis.
+                if getattr(settings, "hybrid_mix_asr", True):
+                    cb(0.78, "Mix ASR for missed words")
+                    mix = asr_mod.transcribe(
+                        str(wav), settings,
+                        progress=lambda f, m="": cb(0.78 + 0.2 * f, m),
+                        cancel_check=cancel_check,
+                    )
+                    asr_res = asr_mod.merge_mix_gap_words(
+                        asr_res, mix, diar.segments,
+                    )
+            else:
+                asr_res = asr_mod.transcribe(
+                    str(wav), settings, progress=cb, cancel_check=cancel_check,
+                )
             done += _STAGES[2][1]
 
         check_cancel(project_id)

@@ -174,6 +174,11 @@ class Settings:
     vad_filter: bool = False   # OFF preserves quiet/short words (better for CA)
     transcript_layout: str = "standard"  # standard | japanese_four_line
     japanese_auto_translate: bool = True
+    # After diarization on a mono mix, ASR each speaker on a masked track so
+    # overlapping speech is not collapsed (needed for multi-party Japanese CA).
+    per_speaker_asr: bool = True
+    # Also run one full-mix ASR and keep words that fell in gaps (quiet talk).
+    hybrid_mix_asr: bool = True
 
     # Diarization — ON by default; HF token from env / data/secrets / bundled installer
     enable_diarization: bool = True

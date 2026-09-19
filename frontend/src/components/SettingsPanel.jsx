@@ -48,10 +48,11 @@ export default function SettingsPanel({ settings, onChange }) {
         <>
           <p className="hint">
             Japanese is forced as the ASR language. <b>large-v3</b> is recommended.
-            Romanization works offline. Direct and natural English rows require
-            OpenAI below and remain editable. Automatic elongation is disabled
-            because Japanese morpheme timestamps otherwise create false colons;
-            add verified CA colons in the editor.
+            Set <b>Number of speakers</b> to the real count (e.g. 4). Overlapping
+            talk is transcribed per speaker. Romanization works offline. Direct
+            and natural English rows require OpenAI below and remain editable.
+            Automatic elongation is disabled because Japanese morpheme timestamps
+            otherwise create false colons; add verified CA colons in the editor.
           </p>
           <label className="field checkbox">
             <input
@@ -174,7 +175,8 @@ export default function SettingsPanel({ settings, onChange }) {
         />
       </label>
       <p className="hint">
-        Default is 2. Change only if you know the true speaker count.
+        Set this to the real count (e.g. 4 for a four-party Japanese conversation).
+        Wrong values merge speakers. Overlapping talk is transcribed per speaker.
       </p>
 
       <h3>OpenAI (optional)</h3>
