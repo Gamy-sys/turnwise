@@ -24,13 +24,15 @@ function parseTime(str) {
 }
 
 // Waveform + zoom + ms-precise selection region.
-const Player = forwardRef(function Player({ url, onTime, onReady, onRegionChange }, ref) {
+const Player = forwardRef(function Player({ url, onTime, onReady, onRegionChange, onPlayingChange }, ref) {
   const containerRef = useRef(null);
   const wsRef = useRef(null);
   const regionsRef = useRef(null);
   const activeRef = useRef(null);
   const onRegionChangeRef = useRef(onRegionChange);
   onRegionChangeRef.current = onRegionChange;
+  const onPlayingChangeRef = useRef(onPlayingChange);
+  onPlayingChangeRef.current = onPlayingChange;
 
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -131,9 +133,18 @@ const Player = forwardRef(function Player({ url, onTime, onReady, onRegionChange
       setCurrent(t);
       onTime && onTime(t);
     });
-    ws.on("play", () => setPlaying(true));
-    ws.on("pause", () => setPlaying(false));
-    ws.on("finish", () => setPlaying(false));
+    ws.on("play", () => {
+      setPlaying(true);
+      onPlayingChangeRef.current && onPlayingChangeRef.current(true);
+    });
+    ws.on("pause", () => {
+      setPlaying(false);
+      onPlayingChangeRef.current && onPlayingChangeRef.current(false);
+    });
+    ws.on("finish", () => {
+      setPlaying(false);
+      onPlayingChangeRef.current && onPlayingChangeRef.current(false);
+    });
     return () => {
       activeRef.current = null;
       ws.destroy();
@@ -158,6 +169,13 @@ const Player = forwardRef(function Player({ url, onTime, onReady, onRegionChange
     play() { wsRef.current && wsRef.current.play(); },
     pause() { wsRef.current && wsRef.current.pause(); },
     playPause() { wsRef.current && wsRef.current.playPause(); },
+    setRate(r) {
+      const n = Number(r);
+      if (!Number.isFinite(n) || !wsRef.current) return;
+      setRate(n);
+      wsRef.current.setPlaybackRate(n, false);
+    },
+    isPlaying() { return !!wsRef.current?.isPlaying?.(); },
     getRegion() { return region; },
     setRegion(start, end, opts) { return ensureRegion(start, end, opts); },
     clearRegion() {

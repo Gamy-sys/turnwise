@@ -36,15 +36,25 @@ export default function TranscriptView({
   }, [transcript]);
 
   useEffect(() => {
-    if (activeRef.current && containerRef.current && !editingId) {
+    if (!activeId || editingId) return;
+    // Wait one frame so the active word has laid out before measuring.
+    const raf = requestAnimationFrame(() => {
       const el = activeRef.current;
       const c = containerRef.current;
-      const r = el.getBoundingClientRect();
+      if (!el || !c) return;
+      const er = el.getBoundingClientRect();
       const cr = c.getBoundingClientRect();
-      if (r.top < cr.top + 40 || r.bottom > cr.bottom - 40) {
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-    }
+      if (cr.height < 40) return;
+      // Pin the speaking word near ~30% from the top so turn-taking and
+      // wrap lines stay in view. Instant scrollTop (no smooth) avoids
+      // queued animations when speakers change quickly.
+      const target = cr.top + cr.height * 0.3;
+      const delta = er.top - target;
+      // Tiny dead zone only — follow the talk closely without jitter.
+      if (Math.abs(delta) < 12) return;
+      c.scrollTop += delta;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [activeId, editingId]);
 
   if (!transcript) return null;

@@ -105,6 +105,8 @@ export default function App() {
   const [transcript, setTranscript] = useState(null);
   const [status, setStatus] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [tab, setTab] = useState("new"); // new | project
@@ -735,6 +737,13 @@ export default function App() {
 
   const pct = status ? Math.round((status.progress || 0) * 100) : 0;
 
+  const fmtClock = (s) => {
+    if (s == null || Number.isNaN(s)) return "0:00.000";
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toFixed(3).padStart(6, "0")}`;
+  };
+
   const [sidebarW, setSidebarW] = usePersistedNumber("ca-layout-sidebar-w", 340, { min: 200, max: 560 });
   const [sidebarOpen, setSidebarOpen] = usePersistedBool("ca-layout-sidebar-open", true);
   const [inspectorW, setInspectorW] = usePersistedNumber("ca-layout-inspector-w", 320, { min: 200, max: 560 });
@@ -989,14 +998,50 @@ export default function App() {
               </div>
             )}
 
-            {showPlayer && (
+            {/* Persistent play controls — stay visible even if waveform panel is hidden */}
+            <div className="sticky-transport" role="toolbar" aria-label="Playback">
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => playerRef.current && playerRef.current.playPause()}
+                title="Play / pause"
+              >
+                {playing ? "⏸ Pause" : "▶ Play"}
+              </button>
+              <span className="time sticky-time">
+                {fmtClock(currentTime)} / {fmtClock(audioDuration || transcript.duration || 0)}
+              </span>
+              <div className="rate sticky-rate">
+                <span>speed</span>
+                {[0.5, 0.75, 1, 1.5].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className="chip"
+                    onClick={() => playerRef.current && playerRef.current.setRate(r)}
+                  >
+                    {r}×
+                  </button>
+                ))}
+              </div>
+              {!showPlayer && (
+                <button type="button" className="chip" onClick={() => setShowPlayer(true)}>
+                  Show waveform
+                </button>
+              )}
+            </div>
+
+            {/* Always mount Player (engine stays alive when waveform UI is hidden) */}
+            <div className={showPlayer ? "player-dock" : "player-dock player-dock-engine"}>
               <CollapsiblePanel
                 id="player"
                 title="Waveform"
                 className="waveform-dock"
                 storageKey="ca-panel-open-player"
                 headerExtra={
-                  <button type="button" className="panel-hide" title="Hide waveform" onClick={() => setShowPlayer(false)}>✕</button>
+                  showPlayer ? (
+                    <button type="button" className="panel-hide" title="Hide waveform" onClick={() => setShowPlayer(false)}>✕</button>
+                  ) : null
                 }
               >
                 <Player
@@ -1007,9 +1052,11 @@ export default function App() {
                       : audioUrl(pid)
                   }
                   onTime={setCurrentTime}
+                  onPlayingChange={setPlaying}
+                  onReady={(d) => setAudioDuration(d || 0)}
                   onRegionChange={setRegion}
                 />
-                {!viewing && (
+                {showPlayer && !viewing && (
                   <div className="wave-quick-add">
                     <button
                       type="button"
@@ -1033,7 +1080,7 @@ export default function App() {
                     </span>
                   </div>
                 )}
-                {viewing && (
+                {showPlayer && viewing && (
                   <ClipRerunBar
                     pid={pid}
                     viewing={viewing}
@@ -1053,7 +1100,7 @@ export default function App() {
                   />
                 )}
               </CollapsiblePanel>
-            )}
+            </div>
 
             {showPitch && (
               <CollapsiblePanel

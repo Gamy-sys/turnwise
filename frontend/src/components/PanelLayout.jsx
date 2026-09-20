@@ -112,7 +112,10 @@ export function CollapsiblePanel({
         </button>
         <div className="panel-chrome-extra">{headerExtra}</div>
       </div>
-      {open && <div className="panel-body">{children}</div>}
+      {/* Keep body mounted (display:none when collapsed) so audio/waveform engines survive collapse */}
+      <div className="panel-body" hidden={!open} style={open ? undefined : { display: "none" }}>
+        {children}
+      </div>
     </div>
   );
 }
