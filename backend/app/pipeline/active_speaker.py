@@ -1,16 +1,14 @@
-"""Lip / mouth-motion active-speaker cues from video (optional).
+"""Visual active-speaker cues from video (optional) — sakura-like table talk.
 
-General-purpose: any clip with visible faces. No corpus-specific IDs.
+Distant / small faces often break Face Mesh lips. This module targets the common
+CA recording style instead:
 
-Pipeline:
-  1. Sample frames from the source video
-  2. Detect face landmarks (MediaPipe Face Mesh)
-  3. Track faces across time (centroid + IoU)
-  4. Score mouth opening motion per track
-  5. Fuse with pyannote segments so overlap / mis-attribution follows lips
+  1. MediaPipe **Face Detection** (full-range) — finds small faces reliably
+  2. Per-face **animation** — frame-diff in an expanded head/shoulder ROI
+  3. **Gaze / head yaw** — nose vs eye midpoint (who turns / looks while talking)
+  4. Fuse with pyannote so overlap follows the animated / gazing person
 
-Fails soft: if OpenCV/MediaPipe missing or no faces, returns unavailable and
-the audio-only path continues unchanged.
+No corpus-specific IDs. Soft-fails without vision deps or detections.
 """
 from __future__ import annotations
 
@@ -25,33 +23,30 @@ from .diarization import DiarResult, _detect_overlaps
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpeg", ".mpg"}
 
-# MediaPipe Face Mesh lip landmarks (outer / inner mouth)
-_LIP_TOP = 13
-_LIP_BOT = 14
-_LIP_LEFT = 78
-_LIP_RIGHT = 308
+# FaceDetection relative keypoints
+_KP_RIGHT_EYE = 0
+_KP_LEFT_EYE = 1
+_KP_NOSE = 2
+_KP_MOUTH = 3
 
 
 @dataclass
 class FaceTrack:
     track_id: int
-    # (t_sec, mouth_open, motion) samples
-    samples: list[tuple[float, float, float]] = field(default_factory=list)
-    # last bbox (x1,y1,x2,y2) normalized 0-1
+    # (t_sec, activity, motion, abs_yaw)
+    samples: list[tuple[float, float, float, float]] = field(default_factory=list)
     last_bbox: tuple[float, float, float, float] | None = None
+    last_gray_roi: np.ndarray | None = None
 
 
 @dataclass
 class ActiveSpeakerResult:
     available: bool = False
     error: str | None = None
-    source: str = "mediapipe-facemesh"
+    source: str = "mediapipe-facedet"
     n_faces: int = 0
-    # (start, end, face_id) where lips look active
     visual_segments: list[tuple[float, float, str]] = field(default_factory=list)
-    # face_id -> audio speaker label after fusion mapping
     face_to_speaker: dict[str, str] = field(default_factory=dict)
-    # refined audio-style segments (same shape as diarization)
     fused_segments: list[tuple[float, float, str]] = field(default_factory=list)
 
 
@@ -64,7 +59,7 @@ def analyze_active_speaker(
     settings,
     progress=None,
 ) -> ActiveSpeakerResult:
-    """Return lip-activity tracks + coarse visual speaking segments."""
+    """Return visual-activity tracks + speaking segments (motion + gaze)."""
     if not getattr(settings, "enable_active_speaker", True):
         return ActiveSpeakerResult(available=False, error="active speaker disabled")
     video_path = Path(video_path)
@@ -81,7 +76,7 @@ def analyze_active_speaker(
         )
 
     if progress:
-        progress(0.05, "Scanning faces / lip motion")
+        progress(0.05, "Scanning faces / motion / gaze")
 
     try:
         tracks, fps_used, duration = _extract_tracks(video_path, settings, progress)
@@ -98,7 +93,7 @@ def analyze_active_speaker(
         available=True,
         n_faces=len(tracks),
         visual_segments=visual_segs,
-        source=f"mediapipe-facemesh@{fps_used:.1f}fps",
+        source=f"facedet+motion+gaze@{fps_used:.1f}fps",
     )
 
 
@@ -107,12 +102,7 @@ def fuse_with_diarization(
     visual: ActiveSpeakerResult,
     settings=None,
 ) -> DiarResult:
-    """Refine audio diarization with lip-activity priors.
-
-    - Learns a face↔audio-speaker mapping from co-occurrence
-    - In overlap (or short disputed spans), prefers the visually active face
-    - Adds brief visual-only spans when lips move but audio diar missed them
-    """
+    """Refine audio diarization with visual activity priors."""
     if not diar.available or not diar.segments:
         return diar
     if not visual.available or not visual.visual_segments:
@@ -132,21 +122,18 @@ def fuse_with_diarization(
         max((e for _, e, _ in visual.visual_segments), default=0.0),
     )
     refined = _refine_segments(diar.segments, visual.visual_segments, mapping, duration, hop)
-    # Optional: attach short visual-only regions mapped onto audio labels
     refined = _add_visual_only(refined, visual.visual_segments, mapping, min_dur=0.18)
-
     refined.sort(key=lambda s: (s[0], s[1], s[2]))
     refined = _merge_adjacent(refined, gap=0.05)
     visual.fused_segments = refined
 
-    out = DiarResult(
+    return DiarResult(
         segments=refined,
         overlaps=_detect_overlaps(refined),
         available=True,
         error=None,
-        source=f"{diar.source}+lips",
+        source=f"{diar.source}+vision",
     )
-    return out
 
 
 def _extract_tracks(video_path: Path, settings, progress=None):
@@ -164,21 +151,20 @@ def _extract_tracks(video_path: Path, settings, progress=None):
     target_fps = float(getattr(settings, "active_speaker_fps", 5.0) or 5.0)
     target_fps = max(2.0, min(target_fps, 12.0))
     step = max(1, int(round(fps / target_fps))) if fps > 0 else 5
+    max_faces = int(getattr(settings, "num_speakers", None) or 4)
 
-    # static_image_mode=True re-detects every sampled frame — more reliable when
-    # people turn away briefly; still cheap at 5–8 fps.
-    mesh = mp.solutions.face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=int(getattr(settings, "num_speakers", None) or 4),
-        refine_landmarks=True,
-        min_detection_confidence=0.25,
-        min_tracking_confidence=0.25,
+    # model_selection=1 = full-range detector (small / distant faces — table talk)
+    detector = mp.solutions.face_detection.FaceDetection(
+        model_selection=1,
+        min_detection_confidence=float(
+            getattr(settings, "active_speaker_detect_thr", 0.15) or 0.15
+        ),
     )
 
     tracks: list[FaceTrack] = []
     next_id = 0
     frame_i = 0
-    prev_open: dict[int, float] = {}
+    prev_yaw: dict[int, float] = {}
 
     try:
         while True:
@@ -189,44 +175,89 @@ def _extract_tracks(video_path: Path, settings, progress=None):
                 frame_i += 1
                 continue
             t = frame_i / fps if fps > 0 else frame_i / target_fps
+            h, w = frame.shape[:2]
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            res = mesh.process(rgb)
-            detections: list[tuple[tuple[float, float, float, float], float]] = []
-            if res.multi_face_landmarks:
-                for fl in res.multi_face_landmarks:
-                    xs = [p.x for p in fl.landmark]
-                    ys = [p.y for p in fl.landmark]
-                    bbox = (min(xs), min(ys), max(xs), max(ys))
-                    open_amt = _mouth_open(fl.landmark)
-                    detections.append((bbox, open_amt))
+            res = detector.process(rgb)
+
+            detections: list[tuple[tuple[float, float, float, float], float, float, np.ndarray]] = []
+            if res.detections:
+                scored = []
+                for det in res.detections:
+                    conf = float(det.score[0]) if det.score else 0.0
+                    bb = det.location_data.relative_bounding_box
+                    bbox = (
+                        float(bb.xmin),
+                        float(bb.ymin),
+                        float(bb.xmin + bb.width),
+                        float(bb.ymin + bb.height),
+                    )
+                    yaw = _yaw_from_keypoints(det)
+                    scored.append((conf, bbox, yaw))
+                scored.sort(reverse=True)
+                for conf, bbox, yaw in scored[: max(max_faces + 1, 4)]:
+                    roi = _crop_motion_roi(gray, bbox, h, w)
+                    detections.append((bbox, conf, yaw, roi))
 
             assigned = _assign_detections(tracks, detections, next_id)
             next_id = max(next_id, max((tr.track_id for tr in tracks), default=-1) + 1)
-            for tr, open_amt in assigned:
-                prev = prev_open.get(tr.track_id, open_amt)
-                motion = abs(open_amt - prev)
-                prev_open[tr.track_id] = open_amt
-                tr.samples.append((t, open_amt, motion))
+
+            for tr, yaw, roi in assigned:
+                motion = 0.0
+                if tr.last_gray_roi is not None and roi is not None and roi.size and tr.last_gray_roi.size:
+                    a = tr.last_gray_roi
+                    b = roi
+                    if a.shape != b.shape:
+                        b = cv2.resize(b, (a.shape[1], a.shape[0]))
+                    motion = float(np.mean(np.abs(a.astype(np.float32) - b.astype(np.float32))) / 255.0)
+                tr.last_gray_roi = roi
+                dyaw = abs(yaw - prev_yaw.get(tr.track_id, yaw))
+                prev_yaw[tr.track_id] = yaw
+                # Activity: body/face animation + head-turn (gaze shift)
+                activity = motion + 0.45 * min(dyaw, 0.35)
+                tr.samples.append((t, activity, motion, abs(yaw)))
 
             if progress and n_frames > 0 and frame_i % (step * 10) == 0:
-                progress(min(0.05 + 0.85 * (frame_i / max(n_frames, 1)), 0.9), "Lip activity")
+                progress(min(0.05 + 0.85 * (frame_i / max(n_frames, 1)), 0.9), "Motion / gaze")
             frame_i += 1
     finally:
         cap.release()
-        mesh.close()
+        detector.close()
 
     return tracks, (fps / step if step else fps), duration
 
 
-def _mouth_open(landmarks) -> float:
-    """Normalized vertical lip gap / mouth width."""
-    top = landmarks[_LIP_TOP]
-    bot = landmarks[_LIP_BOT]
-    left = landmarks[_LIP_LEFT]
-    right = landmarks[_LIP_RIGHT]
-    vert = abs(top.y - bot.y)
-    horiz = max(abs(right.x - left.x), 1e-6)
-    return float(vert / horiz)
+def _yaw_from_keypoints(detection) -> float:
+    """Approximate head yaw: nose x vs eye midpoint, normalized by face width."""
+    loc = detection.location_data
+    kps = loc.relative_keypoints
+    if not kps or len(kps) < 3:
+        return 0.0
+    bb = loc.relative_bounding_box
+    width = max(float(bb.width), 1e-6)
+    mid = 0.5 * (float(kps[_KP_RIGHT_EYE].x) + float(kps[_KP_LEFT_EYE].x))
+    nose = float(kps[_KP_NOSE].x)
+    return (nose - mid) / width
+
+
+def _crop_motion_roi(gray, bbox, h: int, w: int):
+    """Head + upper-shoulder band (speakers often animate when talking)."""
+    import cv2
+
+    x1, y1, x2, y2 = bbox
+    bw, bh = x2 - x1, y2 - y1
+    # expand sideways and downward into shoulders/torso
+    x1e = max(0.0, x1 - 0.2 * bw)
+    x2e = min(1.0, x2 + 0.2 * bw)
+    y1e = max(0.0, y1 - 0.15 * bh)
+    y2e = min(1.0, y2 + 1.1 * bh)
+    xa, xb = int(x1e * w), int(x2e * w)
+    ya, yb = int(y1e * h), int(y2e * h)
+    if xb - xa < 8 or yb - ya < 8:
+        return None
+    roi = gray[ya:yb, xa:xb]
+    # normalize size for stable frame-diff across track
+    return cv2.resize(roi, (48, 64))
 
 
 def _bbox_iou(a, b) -> float:
@@ -248,62 +279,57 @@ def _bbox_center(b):
 
 
 def _assign_detections(tracks: list[FaceTrack], detections, next_id: int):
-    """Greedy IoU / distance match of face detections to existing tracks."""
-    result: list[tuple[FaceTrack, float]] = []
+    """Greedy IoU match. detections: (bbox, conf, yaw, roi)."""
+    result: list[tuple[FaceTrack, float, np.ndarray | None]] = []
     unused = set(range(len(detections)))
-    # score matrix
     pairs: list[tuple[float, int, int]] = []
     for ti, tr in enumerate(tracks):
         if tr.last_bbox is None:
             continue
         for di in unused:
-            bbox, _ = detections[di]
+            bbox = detections[di][0]
             iou = _bbox_iou(tr.last_bbox, bbox)
             cx, cy = _bbox_center(tr.last_bbox)
             dx, dy = _bbox_center(bbox)
             dist = ((cx - dx) ** 2 + (cy - dy) ** 2) ** 0.5
-            score = iou * 2.0 - dist
-            pairs.append((score, ti, di))
+            pairs.append((iou * 2.0 - dist, ti, di))
     pairs.sort(reverse=True)
     used_t, used_d = set(), set()
     for score, ti, di in pairs:
-        if score < -0.15:
+        if score < -0.2:
             break
         if ti in used_t or di in used_d:
             continue
         used_t.add(ti)
         used_d.add(di)
         unused.discard(di)
-        bbox, open_amt = detections[di]
+        bbox, _conf, yaw, roi = detections[di]
         tracks[ti].last_bbox = bbox
-        result.append((tracks[ti], open_amt))
+        result.append((tracks[ti], yaw, roi))
 
     for di in list(unused):
-        bbox, open_amt = detections[di]
+        bbox, _conf, yaw, roi = detections[di]
         tr = FaceTrack(track_id=next_id, last_bbox=bbox)
         next_id += 1
         tracks.append(tr)
-        result.append((tr, open_amt))
+        result.append((tr, yaw, roi))
     return result
 
 
 def _keep_top_tracks(tracks: list[FaceTrack], k: int) -> list[FaceTrack]:
     scored = sorted(
         tracks,
-        key=lambda tr: (len(tr.samples), sum(m for _, _, m in tr.samples)),
+        key=lambda tr: (len(tr.samples), sum(a for _, a, _, _ in tr.samples)),
         reverse=True,
     )
     return scored[: max(1, k)]
 
 
 def _tracks_to_segments(tracks: list[FaceTrack], settings) -> list[tuple[float, float, str]]:
-    """Threshold mouth motion into contiguous visual-active spans per face.
-
-    Uses each face's own resting baseline (low percentile of mouth opening) so
-    quiet talkers still register; absolute thresholds alone fail on distant faces.
-    """
-    open_margin = float(getattr(settings, "active_speaker_open_thr", 0.02) or 0.02)
-    motion_thr = float(getattr(settings, "active_speaker_motion_thr", 0.008) or 0.008)
+    """Threshold per-face activity (motion + gaze shift) into spans."""
+    # Frame-diff motion is typically ~0.01–0.08 when someone gestures/talks
+    motion_thr = float(getattr(settings, "active_speaker_motion_thr", 0.018) or 0.018)
+    activity_margin = float(getattr(settings, "active_speaker_open_thr", 0.012) or 0.012)
     min_dur = float(getattr(settings, "active_speaker_min_dur", 0.12) or 0.12)
     segs: list[tuple[float, float, str]] = []
 
@@ -311,11 +337,11 @@ def _tracks_to_segments(tracks: list[FaceTrack], settings) -> list[tuple[float, 
         if len(tr.samples) < 3:
             continue
         face = f"F{tr.track_id}"
-        opens = [op for _, op, _ in tr.samples]
-        baseline = float(np.percentile(opens, 25))
+        acts = [a for _, a, _, _ in tr.samples]
+        baseline = float(np.percentile(acts, 30))
         active_times = [
-            t for t, op, mo in tr.samples
-            if (op >= baseline + open_margin) or (mo >= motion_thr) or (op >= baseline * 1.35 + 0.01)
+            t for t, act, mo, _yaw in tr.samples
+            if act >= baseline + activity_margin or mo >= motion_thr
         ]
         if not active_times:
             continue
@@ -338,7 +364,6 @@ def _tracks_to_segments(tracks: list[FaceTrack], settings) -> list[tuple[float, 
 
 
 def _map_faces_to_speakers(audio_segs, visual_segs, audio_labels, face_ids) -> dict[str, str]:
-    """Maximize co-occurrence overlap between face activity and audio labels."""
     co = {f: {a: 0.0 for a in audio_labels} for f in face_ids}
     for vs, ve, face in visual_segs:
         for as_, ae, spk in audio_segs:
@@ -348,7 +373,6 @@ def _map_faces_to_speakers(audio_segs, visual_segs, audio_labels, face_ids) -> d
 
     mapping: dict[str, str] = {}
     used_spk: set[str] = set()
-    # Greedy: largest co-occurrence first
     pairs = []
     for f in face_ids:
         for a in audio_labels:
@@ -361,7 +385,6 @@ def _map_faces_to_speakers(audio_segs, visual_segs, audio_labels, face_ids) -> d
             continue
         mapping[f] = a
         used_spk.add(a)
-    # Leftover faces → leftover speakers
     leftover_f = [f for f in face_ids if f not in mapping]
     leftover_a = [a for a in audio_labels if a not in used_spk]
     for f, a in zip(leftover_f, leftover_a):
@@ -374,13 +397,10 @@ def _speakers_at(segments, t: float) -> list[str]:
 
 
 def _refine_segments(audio_segs, visual_segs, mapping, duration, hop):
-    """Per time-hop: if audio overlap or conflict, trust mapped visual face."""
     if duration <= 0:
         return list(audio_segs)
 
-    # Build visual label timeline in audio-speaker space
     vis_audio = [(s, e, mapping[f]) for s, e, f in visual_segs if f in mapping]
-
     out_events: list[tuple[float, float, str]] = []
     t = 0.0
     while t < duration:
@@ -389,12 +409,10 @@ def _refine_segments(audio_segs, visual_segs, mapping, duration, hop):
         audio_here = _speakers_at(audio_segs, mid)
         vis_here = _speakers_at(vis_audio, mid)
         if len(audio_here) >= 2 and vis_here:
-            # Overlap: keep visually supported speakers; if one visual, prefer it
             chosen = [v for v in vis_here if v in audio_here] or vis_here[:1]
             for spk in chosen:
                 out_events.append((t, t2, spk))
         elif len(audio_here) == 1 and vis_here and audio_here[0] not in vis_here:
-            # Brief disagreement: if visual is strong singleton, switch
             out_events.append((t, t2, vis_here[0]))
         elif audio_here:
             for spk in audio_here:
@@ -416,7 +434,6 @@ def _events_to_segments(events: list[tuple[float, float, str]]):
             segs[-1] = (segs[-1][0], e, lbl)
         else:
             segs.append((s, e, lbl))
-    # merge near-adjacent same label
     return _merge_adjacent(segs, gap=0.08)
 
 
@@ -436,7 +453,6 @@ def _merge_adjacent(segs, gap=0.05):
 
 
 def _add_visual_only(audio_segs, visual_segs, mapping, min_dur=0.18):
-    """If lips move with no audio label, add a short span for the mapped speaker."""
     out = list(audio_segs)
     for vs, ve, face in visual_segs:
         if ve - vs < min_dur:
@@ -444,7 +460,6 @@ def _add_visual_only(audio_segs, visual_segs, mapping, min_dur=0.18):
         spk = mapping.get(face)
         if not spk:
             continue
-        # coverage by any audio
         covered = 0.0
         for as_, ae, _ in audio_segs:
             ov = min(ve, ae) - max(vs, as_)

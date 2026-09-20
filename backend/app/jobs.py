@@ -346,7 +346,7 @@ def _run(project_id: str, source_path: Path, settings: Settings):
                 try:
                     from .pipeline import active_speaker as as_mod
                     if as_mod.is_video_path(source_path):
-                        cb(0.85, "Lip active-speaker (video)")
+                        cb(0.85, "Visual active-speaker (motion / gaze)")
                         visual = as_mod.analyze_active_speaker(
                             source_path, settings,
                             progress=lambda f, m="": cb(0.85 + 0.12 * f, m),

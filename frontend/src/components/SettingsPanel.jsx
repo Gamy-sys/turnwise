@@ -190,13 +190,13 @@ export default function SettingsPanel({ settings, onChange }) {
           checked={settings.enable_active_speaker !== false}
           onChange={(e) => set("enable_active_speaker", e.target.checked)}
         />
-        <span>Lip active-speaker (video)</span>
+        <span>Visual active-speaker (video: motion + gaze)</span>
       </label>
       <p className="hint">
-        When the source is a video with visible faces, mouth motion refines who is
-        speaking during overlap. Requires{" "}
+        For videos like table-talk CA (small faces): uses face detection + body/head
+        animation + gaze/yaw, then fuses with audio diarization. Requires{" "}
         <code>pip install -r backend/requirements-vision.txt</code> once. Audio-only
-        files are unchanged.
+        files are unchanged. Soft-skips if no faces are found.
       </p>
 
       <h3>OpenAI (optional)</h3>
