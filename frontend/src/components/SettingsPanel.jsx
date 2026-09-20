@@ -184,6 +184,20 @@ export default function SettingsPanel({ settings, onChange }) {
         Default is 4. Set the real count for your recording (e.g. 2 for an interview).
         Wrong values merge speakers.
       </p>
+      <label className="field checkbox">
+        <input
+          type="checkbox"
+          checked={settings.enable_active_speaker !== false}
+          onChange={(e) => set("enable_active_speaker", e.target.checked)}
+        />
+        <span>Lip active-speaker (video)</span>
+      </label>
+      <p className="hint">
+        When the source is a video with visible faces, mouth motion refines who is
+        speaking during overlap. Requires{" "}
+        <code>pip install -r backend/requirements-vision.txt</code> once. Audio-only
+        files are unchanged.
+      </p>
 
       <h3>OpenAI (optional)</h3>
       <label className="field checkbox">

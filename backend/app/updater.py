@@ -436,7 +436,19 @@ def _refresh_python_deps() -> dict:
     code, out = _run(pip, cwd=PROJECT_DIR / "backend", timeout=900)
     if code != 0:
         return {"ok": False, "message": f"pip install failed: {out[-500:]}"}
-    return {"ok": True, "message": "Python deps refreshed"}
+    msgs = ["Python deps refreshed"]
+    vision = PROJECT_DIR / "backend" / "requirements-vision.txt"
+    if vision.exists():
+        code_v, out_v = _run(
+            [sys.executable, "-m", "pip", "install", "-r", str(vision)],
+            cwd=PROJECT_DIR / "backend",
+            timeout=600,
+        )
+        if code_v != 0:
+            msgs.append(f"vision deps optional fail: {out_v[-200:]}")
+        else:
+            msgs.append("vision deps (lip active-speaker) ok")
+    return {"ok": True, "message": "; ".join(msgs)}
 
 
 def apply_update() -> dict:

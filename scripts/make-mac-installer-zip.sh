@@ -101,7 +101,7 @@ fi
 
 # Backend (no venv)
 mkdir -p "$ROOT/backend"
-for f in requirements.txt requirements-diarization.txt; do
+for f in requirements.txt requirements-diarization.txt requirements-vision.txt; do
   [[ -f "$HERE/backend/$f" ]] && cp "$HERE/backend/$f" "$ROOT/backend/"
 done
 rsync -a --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \

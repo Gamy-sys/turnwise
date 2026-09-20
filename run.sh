@@ -91,6 +91,15 @@ if ! "$BACKEND/.venv/bin/python" -c "import importlib.util as u; import sys; sys
     || echo "[warn] diarization install incomplete — speaker labels may be unavailable"
 fi
 
+# Lip active-speaker (optional; video with visible faces)
+if ! "$BACKEND/.venv/bin/python" -c "import importlib.util as u; import sys; sys.exit(0 if u.find_spec('cv2') and u.find_spec('mediapipe') else 1)"; then
+  if [[ -f "$BACKEND/requirements-vision.txt" ]]; then
+    echo "[setup] installing vision deps for lip active-speaker…"
+    "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements-vision.txt" \
+      || echo "[warn] vision install incomplete — lip active-speaker disabled"
+  fi
+fi
+
 # Write the chosen port so the Mac .app can find us without guessing
 echo "$PORT" > "$HERE/data/last_port.txt"
 

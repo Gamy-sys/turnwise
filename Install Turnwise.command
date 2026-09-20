@@ -112,6 +112,9 @@ fi
 "$ROOT/backend/.venv/bin/pip" install -r "$ROOT/backend/requirements-diarization.txt" || {
   echo "WARNING: diarization packages failed to install — will retry on first run"
 }
+"$ROOT/backend/.venv/bin/pip" install -r "$ROOT/backend/requirements-vision.txt" || {
+  echo "WARNING: vision packages failed — lip active-speaker will be skipped until installed"
+}
 
 echo
 echo "[2/3] Building UI (if needed)…"

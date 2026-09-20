@@ -205,6 +205,9 @@ class Settings:
     per_speaker_asr: bool = True
     # Also run one full-mix ASR and keep words that fell in gaps (quiet talk).
     hybrid_mix_asr: bool = True
+    # Video: use mouth/lip motion to refine who is speaking (needs requirements-vision.txt).
+    enable_active_speaker: bool = True
+    active_speaker_fps: float = 5.0
 
     # Diarization — ON by default; HF token from env / data/secrets / bundled installer
     enable_diarization: bool = True

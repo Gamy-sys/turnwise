@@ -339,6 +339,32 @@ def _run(project_id: str, source_path: Path, settings: Settings):
             check_cancel(project_id)
             cb = stage_progress("diarize", _STAGES[1][1])
             diar = diarization.diarize(str(wav), settings, progress=cb)
+            # Video + visible faces: refine diarization with lip / mouth motion.
+            # General for any clip — no corpus-specific IDs. Soft-fails if vision
+            # deps are missing or faces are not found.
+            if getattr(settings, "enable_active_speaker", True) and diar.available:
+                try:
+                    from .pipeline import active_speaker as as_mod
+                    if as_mod.is_video_path(source_path):
+                        cb(0.85, "Lip active-speaker (video)")
+                        visual = as_mod.analyze_active_speaker(
+                            source_path, settings,
+                            progress=lambda f, m="": cb(0.85 + 0.12 * f, m),
+                        )
+                        try:
+                            as_mod.dump_debug(visual, pdir / "active_speaker.json")
+                        except Exception:
+                            pass
+                        if visual.available:
+                            diar = as_mod.fuse_with_diarization(diar, visual, settings)
+                            try:
+                                as_mod.dump_debug(visual, pdir / "active_speaker.json")
+                            except Exception:
+                                pass
+                        elif visual.error:
+                            print("active speaker skipped:", visual.error)
+                except Exception as e:
+                    print("active speaker failed:", e)
             try:
                 (pdir / "diar.json").write_text(
                     json.dumps({

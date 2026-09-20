@@ -1,0 +1,9 @@
+# Optional: lip / mouth-motion active-speaker from video (CPU-friendly).
+# Used when the source is a video with visible faces; fuses with pyannote.
+#
+#   pip install -r requirements-vision.txt
+#
+# Pin MediaPipe 0.10.x — 1.x removed mp.solutions.face_mesh.
+
+opencv-python-headless>=4.8,<5
+mediapipe==0.10.14
