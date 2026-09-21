@@ -335,6 +335,98 @@ def _filter_crosstalk_bleed(words: list[ASRWord], segments) -> list[ASRWord]:
     return [w for i, w in enumerate(words) if i not in drop]
 
 
+def repair_speaker_label_flicker(
+    words: list[ASRWord],
+    max_run_dur: float = 0.75,
+    max_run_words: int = 6,
+    interrupt_dur: float = 0.45,
+    interrupt_words: int = 3,
+    bridge_gap: float = 0.25,
+) -> list[ASRWord]:
+    """Reassign short mid-utterance speaker flips to the flanking talker.
+
+    Diarization often splits one continuous person into A then B (or inserts a
+    brief wrong label inside a longer span). When a short run of Y sits between
+    two runs of X — skipping only brief interruptions — and X's speech bridges
+    across Y (overlap or tiny gap), Y almost always belongs to X. Real
+    backchannels sit in a larger gap and are preserved.
+    """
+    if len(words) < 3:
+        return words
+
+    ordered = sorted(words, key=lambda w: (w.start, w.end, w.speaker or ""))
+    runs: list[tuple[int, int, str, float, float]] = []
+    i = 0
+    n = len(ordered)
+    while i < n:
+        spk = ordered[i].speaker or ""
+        j = i + 1
+        while j < n and (ordered[j].speaker or "") == spk:
+            j += 1
+        runs.append((i, j, spk, ordered[i].start, ordered[j - 1].end))
+        i = j
+
+    def run_stats(run: tuple[int, int, str, float, float]):
+        i0, j0, spk, t0, t1 = run
+        return spk, (t1 - t0), (j0 - i0)
+
+    def is_interrupt(run: tuple[int, int, str, float, float]) -> bool:
+        """Tiny mid-span glitches skipped when searching for flanking talkers."""
+        spk, dur, nw = run_stats(run)
+        if not spk:
+            return True
+        return dur <= interrupt_dur and nw <= interrupt_words
+
+    def is_repairable(run: tuple[int, int, str, float, float]) -> bool:
+        spk, dur, nw = run_stats(run)
+        if not spk:
+            return False
+        return dur <= max_run_dur and nw <= max_run_words
+
+    reassign: dict[int, str] = {}
+    for k, run in enumerate(runs):
+        i0, j0, spk, t0, t1 = run
+        if not is_repairable(run):
+            continue
+        left = None
+        for L in range(k - 1, -1, -1):
+            if is_interrupt(runs[L]):
+                continue
+            left = runs[L]
+            break
+        right = None
+        for R in range(k + 1, len(runs)):
+            if is_interrupt(runs[R]):
+                continue
+            right = runs[R]
+            break
+        if not left or not right:
+            continue
+        if left[2] != right[2] or left[2] == spk:
+            continue
+        # Bridged: flanking X speech overlaps / nearly touches this run, or the
+        # gap between the two X runs is tiny (identity flicker with no pause).
+        bridged = (
+            left[4] >= t0 - 0.08
+            or right[3] <= t1 + 0.08
+            or (right[3] - left[4]) <= bridge_gap
+        )
+        if not bridged:
+            continue
+        for idx in range(i0, j0):
+            reassign[idx] = left[2]
+
+    if not reassign:
+        return ordered
+    out = []
+    for idx, w in enumerate(ordered):
+        if idx in reassign:
+            w.speaker = reassign[idx]
+        out.append(w)
+    out.sort(key=lambda w: (w.start, w.end, w.speaker or ""))
+    return out
+
+
 def transcribe_per_speaker(
     wav_path: str,
     segments: list,
@@ -401,6 +493,8 @@ def transcribe_per_speaker(
 
     all_words.sort(key=lambda w: (w.start, w.end, w.speaker or ""))
     all_words = _filter_crosstalk_bleed(all_words, segments)
+    all_words = repair_speaker_label_flicker(all_words)
+    all_words = repair_speaker_label_flicker(all_words)  # nested brief flips
     return ASRResult(
         language=lang or (settings.language or "en"),
         words=all_words,
@@ -459,6 +553,8 @@ def merge_mix_gap_words(
         kept.append(w)
     kept.sort(key=lambda x: (x.start, x.end, x.speaker or ""))
     kept = _filter_crosstalk_bleed(kept, segments)
+    kept = repair_speaker_label_flicker(kept)
+    kept = repair_speaker_label_flicker(kept)
     return ASRResult(
         language=per_speaker.language or mix.language,
         words=kept,

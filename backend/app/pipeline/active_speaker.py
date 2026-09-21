@@ -125,6 +125,10 @@ def fuse_with_diarization(
     refined = _add_visual_only(refined, visual.visual_segments, mapping, min_dur=0.18)
     refined.sort(key=lambda s: (s[0], s[1], s[2]))
     refined = _merge_adjacent(refined, gap=0.05)
+    # Collapse brief A↔B identity flickers (same talker split across labels).
+    from .diarization import absorb_short_speaker_islands
+
+    refined = absorb_short_speaker_islands(refined)
     visual.fused_segments = refined
 
     return DiarResult(
@@ -397,11 +401,19 @@ def _speakers_at(segments, t: float) -> list[str]:
 
 
 def _refine_segments(audio_segs, visual_segs, mapping, duration, hop):
+    """Fuse audio diarization with visual activity.
+
+    Vision is used to *arbitrate overlaps* and to *hold a sticky label* when
+    pyannote flickers mid-utterance while the previous talker's face is still
+    active. Vision never overrides a lone audio label with a different face —
+    that caused systematic A/B swaps for the same person near clip ends.
+    """
     if duration <= 0:
         return list(audio_segs)
 
     vis_audio = [(s, e, mapping[f]) for s, e, f in visual_segs if f in mapping]
     out_events: list[tuple[float, float, str]] = []
+    prev_spk: str | None = None
     t = 0.0
     while t < duration:
         t2 = min(duration, t + hop)
@@ -412,13 +424,28 @@ def _refine_segments(audio_segs, visual_segs, mapping, duration, hop):
             chosen = [v for v in vis_here if v in audio_here] or vis_here[:1]
             for spk in chosen:
                 out_events.append((t, t2, spk))
-        elif len(audio_here) == 1 and vis_here and audio_here[0] not in vis_here:
-            out_events.append((t, t2, vis_here[0]))
+            prev_spk = chosen[0] if chosen else prev_spk
+        elif len(audio_here) == 1:
+            spk = audio_here[0]
+            # Sticky continuity: hold the previous talker while their face is
+            # still active. Mid-utterance pyannote A→B swaps often fire while
+            # both faces move (talker + listener); do not accept the swap until
+            # the previous face goes quiet.
+            if prev_spk and prev_spk != spk and prev_spk in vis_here:
+                spk = prev_spk
+            out_events.append((t, t2, spk))
+            prev_spk = spk
         elif audio_here:
             for spk in audio_here:
                 out_events.append((t, t2, spk))
+            prev_spk = audio_here[0]
         elif vis_here:
-            out_events.append((t, t2, vis_here[0]))
+            # Prefer sticky face if still active; else first visual label.
+            if prev_spk and prev_spk in vis_here:
+                out_events.append((t, t2, prev_spk))
+            else:
+                out_events.append((t, t2, vis_here[0]))
+                prev_spk = vis_here[0]
         t = t2
 
     return _events_to_segments(out_events)

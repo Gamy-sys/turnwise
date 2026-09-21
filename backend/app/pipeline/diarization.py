@@ -110,6 +110,8 @@ def diarize(wav_path: str, settings, progress=None) -> DiarResult:
         segments.sort(key=lambda s: s[0])
 
         overlaps = _detect_overlaps(segments)
+        segments = absorb_short_speaker_islands(segments)
+        overlaps = _detect_overlaps(segments)
         return DiarResult(segments=segments, overlaps=overlaps, available=True,
                           source=model_id or "pyannote")
     except Exception as e:  # pragma: no cover
@@ -155,6 +157,74 @@ def _detect_overlaps(segments: list[tuple[float, float, str]]) -> list[tuple[flo
             overlaps.append((ov_start, t))
             ov_start = None
     return overlaps
+
+
+def absorb_short_speaker_islands(
+    segments: list[tuple[float, float, str]],
+    min_dur: float = 0.35,
+    max_gap: float = 0.12,
+) -> list[tuple[float, float, str]]:
+    """Relabel brief speaker islands flanked by the same other speaker.
+
+    Pyannote (and vision fusion) often split one continuous talker into A then
+    B for a few hundred ms, then back to A — especially near clip ends. Those
+    short interior labels become false turn changes downstream. Real
+    backchannels usually sit in a larger gap and are left alone.
+    """
+    if not segments:
+        return []
+
+    # Work on a mutable copy; keep overlaps of different speakers intact by
+    # only rewriting segments that are short and *non-overlapping* with their
+    # flanking same-label neighbors' interior pattern in time order.
+    segs = sorted(segments, key=lambda s: (s[0], s[1], s[2]))
+    # Build a non-overlap timeline view: for each segment, find nearest other
+    # segments that end before it starts / start after it ends.
+    changed = True
+    guard = 0
+    while changed and guard < 8:
+        guard += 1
+        changed = False
+        out: list[tuple[float, float, str]] = []
+        for i, (s, e, lbl) in enumerate(segs):
+            dur = e - s
+            if dur >= min_dur:
+                out.append((s, e, lbl))
+                continue
+            # Nearest finished segment before this one starts
+            left = None
+            right = None
+            for j, (s2, e2, lbl2) in enumerate(segs):
+                if j == i:
+                    continue
+                if e2 <= s + 1e-6 and s - e2 <= max_gap:
+                    if left is None or e2 > left[1]:
+                        left = (s2, e2, lbl2)
+                if s2 >= e - 1e-6 and s2 - e <= max_gap:
+                    if right is None or s2 < right[0]:
+                        right = (s2, e2, lbl2)
+            if (
+                left
+                and right
+                and left[2] == right[2]
+                and left[2] != lbl
+            ):
+                out.append((s, e, left[2]))
+                changed = True
+            else:
+                out.append((s, e, lbl))
+        segs = out
+
+    # Merge same-label neighbors that now touch after relabel.
+    segs = sorted(segs, key=lambda s: (s[2], s[0], s[1]))
+    merged: list[tuple[float, float, str]] = []
+    for s, e, lbl in segs:
+        if merged and merged[-1][2] == lbl and s <= merged[-1][1] + max_gap:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e), lbl)
+        else:
+            merged.append((s, e, lbl))
+    merged.sort(key=lambda s: (s[0], s[1], s[2]))
+    return merged
 
 
 def speaker_at(segments: list[tuple[float, float, str]], t: float, default: str = "A") -> str:

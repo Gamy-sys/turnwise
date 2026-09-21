@@ -163,6 +163,16 @@ def build_transcript(project_id: str, filename: str, duration: float,
         for w in words:
             w.speaker = "A"  # type: ignore[attr-defined]
         labels = ["A"]
+
+    # Collapse brief mid-utterance speaker flips (same talker labeled A then B).
+    try:
+        from .asr import repair_speaker_label_flicker
+
+        words = repair_speaker_label_flicker(words)
+        words = repair_speaker_label_flicker(words)
+    except Exception:
+        pass
+    labels = sorted({w.speaker for w in words if getattr(w, "speaker", None)}) or ["A"]
     speakers = [Speaker(id=l, label=l) for l in labels]
 
     # ---- per-speaker baselines for volume + tempo ------------------------
